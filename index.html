@@ -1,0 +1,1299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ami 4 Mayor Canvassing App</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+
+<style>
+  :root {
+    --paper: #EEF2F4;
+    --panel: #FFFFFF;
+    --ink: #1C2B38;
+    --muted: #5C707C;
+    --border: #D5DEE2;
+    --line: #4A6577;
+    --focus: #2F6F8F;
+    --select: #1257FF;
+    --accent: #E0622B;
+    --accent-ink: #FFFFFF;
+    --danger: #C0392B;
+    --shadow: 0 12px 32px -12px rgba(28,43,56,0.28);
+
+    --status-nh: #9AA7AE;
+    --status-1: #3FAE62;
+    --status-2: #E0B23F;
+    --status-3: #D1493F;
+    --status-none-fill: #4A6577;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0F1B23;
+      --panel: #16232C;
+      --ink: #E6EDF1;
+      --muted: #8FA3AE;
+      --border: #263640;
+      --line: #7C93A2;
+      --focus: #5FA8C9;
+      --select: #3D8BFF;
+      --accent: #F0793F;
+      --accent-ink: #171008;
+      --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0F1B23;
+    --panel: #16232C;
+    --ink: #E6EDF1;
+    --muted: #8FA3AE;
+    --border: #263640;
+    --line: #7C93A2;
+    --focus: #5FA8C9;
+    --select: #3D8BFF;
+    --accent: #F0793F;
+    --accent-ink: #171008;
+    --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Public Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    overflow: hidden;
+  }
+
+  h1, h2, h3, .brand { font-family: "Archivo", sans-serif; }
+
+  button { font-family: inherit; }
+
+  /* ---------- top bar ---------- */
+  #topbar {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    position: relative;
+    z-index: 20;
+  }
+  #topbar .brand {
+    font-weight: 800;
+    font-size: 1.02rem;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #topbar .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  #user-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  #user-chip strong { color: var(--ink); }
+  #logout-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 7px;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  #logout-btn:hover { background: var(--paper); color: var(--ink); }
+
+  #demo-banner {
+    display: none;
+    background: #F0793F22;
+    color: var(--accent);
+    font-size: 0.76rem;
+    text-align: center;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #demo-banner.show { display: block; }
+
+  /* ---------- layout ---------- */
+  main.layout {
+    height: calc(100% - 52px);
+    display: flex;
+    position: relative;
+  }
+  main.layout.with-banner { height: calc(100% - 52px - 24px); }
+
+  #map { flex: 1; height: 100%; background: var(--paper); }
+
+  /* Kills the faint moving grid of hairline seams between adjacent map
+     tiles that shows up mainly on mobile Safari/retina screens, worse when
+     several tile layers are stacked (our Hybrid basemap is three). The
+     seams come from the browser's sub-pixel rounding of each tile's
+     position while panning/zooming; a transparent outline forces it to
+     pixel-snap instead of anti-alias the edge. Purely cosmetic, standard
+     Leaflet workaround. */
+  .leaflet-tile { outline: 1px solid transparent; }
+
+  /* ---------- loading overlay ---------- */
+  #loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    z-index: 500;
+    pointer-events: none;
+  }
+  #loading-overlay.show { display: flex; }
+  #loading-overlay .spinner {
+    width: 34px;
+    height: 34px;
+    border: 3px solid var(--border);
+    border-top-color: var(--select);
+    border-radius: 50%;
+    animation: a4m-spin 0.8s linear infinite;
+  }
+  #loading-overlay .loading-text { font-size: 0.85rem; color: var(--muted); }
+  @keyframes a4m-spin { to { transform: rotate(360deg); } }
+
+  aside.sidebar {
+    width: 340px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+
+  .sidebar-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
+
+  #search-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  #search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  #address-list {
+    flex: 1;
+    overflow-y: auto;
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+  }
+  #address-list li {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  #address-list li:hover { background: var(--paper); }
+  #address-list li.active {
+    background: var(--select);
+    color: #fff;
+    font-weight: 600;
+  }
+  #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
+
+  .sidebar-footer {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  /* ---------- map address button ---------- */
+  /* ---------- base layer switcher ---------- */
+  .leaflet-control-layers {
+    border-radius: 8px !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: var(--shadow) !important;
+    background: var(--panel) !important;
+    color: var(--ink);
+    font-family: "Public Sans", sans-serif;
+  }
+  .leaflet-control-layers-toggle { border-radius: 8px; }
+  .leaflet-control-layers-expanded { padding: 8px 10px; font-size: 0.85rem; }
+  .leaflet-control-layers-selector { accent-color: var(--select); margin-right: 6px; }
+
+  /* ---------- my-location control ---------- */
+  .locate-control-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .locate-control-link:hover { background: var(--paper); }
+  .locate-control-link.active { color: var(--select); }
+  .user-location-marker { background: transparent; border: none; }
+  .user-location-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #1257FF;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 2px rgba(18,87,255,0.35), 0 1px 4px rgba(0,0,0,0.35);
+  }
+
+  /* ---------- parcel house-number labels ---------- */
+  .parcel-number-label { background: transparent; border: none; }
+  .parcel-number-label span {
+    transform: translate(-50%, -50%);
+    position: relative;
+    display: inline-block;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .address-marker { background: transparent; border: none; }
+  .address-btn {
+    transform: translate(-50%, calc(-100% - 12px));
+    position: relative;
+    display: inline-block;
+    white-space: nowrap;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    font-family: "Public Sans", sans-serif;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+  }
+  .address-btn:hover { filter: brightness(1.06); }
+  .address-btn::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--accent);
+  }
+
+  /* ---------- modal dialog ---------- */
+  #dialog-overlay {
+    position: fixed; inset: 0;
+    background: rgba(20, 30, 38, 0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  #dialog-overlay.show { display: flex; }
+
+  #edit-dialog {
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 18px 18px 14px;
+  }
+  #edit-dialog h3 { margin: 0 0 4px; font-size: 1rem; }
+  #edit-dialog .field { margin-top: 12px; }
+  #edit-dialog label.field-label {
+    display: block;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 5px;
+  }
+  #dlg-address {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .radio-row label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .radio-row input[type="radio"] { accent-color: var(--select); }
+  .radio-row label:has(input:checked) {
+    border-color: var(--select);
+    background: color-mix(in srgb, var(--select) 12%, transparent);
+    font-weight: 600;
+  }
+  .checkbox-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .checkbox-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .checkbox-row input[type="checkbox"] { accent-color: var(--select); }
+  .checkbox-row label:has(input:checked) {
+    border-color: var(--select);
+    background: color-mix(in srgb, var(--select) 12%, transparent);
+    font-weight: 600;
+  }
+  #dlg-note {
+    width: 100%;
+    min-height: 84px;
+    resize: vertical;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+  #dlg-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
+  .dialog-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .btn {
+    flex: 1;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+  }
+  .btn:hover { filter: brightness(0.97); }
+  .btn.primary { background: var(--select); border-color: var(--select); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+
+  /* ---------- login screen ---------- */
+  #login-overlay {
+    position: fixed; inset: 0;
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+  #login-overlay.hide { display: none; }
+  #login-card {
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    background: var(--panel);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 26px 24px 22px;
+  }
+  #login-card .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  #login-card .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  #login-card p.sub { color: var(--muted); font-size: 0.8rem; margin: 0 0 18px; }
+  #login-card .field { margin-bottom: 12px; }
+  #login-card label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+  #login-card input {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+  #login-error {
+    color: var(--danger);
+    font-size: 0.78rem;
+    min-height: 1.2em;
+    margin: 4px 0 10px;
+  }
+  #login-card .btn.primary { width: 100%; flex: none; padding: 10px; }
+  #login-card .config-note {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
+  /* Phone, portrait: stack map above list, but keep the map small so the
+     address list (the thing people are actually scrolling and tapping) gets
+     most of the screen. */
+  @media (max-width: 760px) and (orientation: portrait) {
+    main.layout { flex-direction: column; }
+    aside.sidebar { width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
+    #map { flex: 0 0 auto; height: 40vh; }
+  }
+
+  /* Phone, landscape: keep the side-by-side layout (map left, panel right)
+     instead of stacking -- just trim the panel width for short screens. */
+  @media (max-height: 500px) and (orientation: landscape) {
+    aside.sidebar { width: 260px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-overlay">
+  <div id="login-card">
+    <div class="brand"><span class="dot"></span>Ami 4 Mayor</div>
+    <p class="sub">Canvassing App &mdash; sign in to continue</p>
+    <form id="login-form">
+      <div class="field">
+        <label for="login-username">Username</label>
+        <input id="login-username" name="username" type="text" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div id="login-error"></div>
+      <button type="submit" class="btn primary" id="login-submit">Log in</button>
+    </form>
+    <div class="config-note" id="login-config-note"></div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="topbar">
+  <div class="brand"><span class="dot"></span>Ami 4 Mayor Canvassing App</div>
+  <div id="user-chip">
+    <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
+    <button id="logout-btn" type="button">Log out</button>
+  </div>
+</div>
+<div id="demo-banner">Demo mode &mdash; not connected to a Google Sheet yet. See README to wire up the Apps Script backend. Saves are kept only in this browser.</div>
+
+<main class="layout" id="main-layout">
+  <div id="map"></div>
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Address</h2>
+      <input id="search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+    </div>
+    <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
+    <div class="sidebar-footer" id="count-footer">&nbsp;</div>
+  </aside>
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading map data&hellip;</div>
+  </div>
+</main>
+
+<!-- ============ EDIT DIALOG ============ -->
+<div id="dialog-overlay">
+  <div id="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+    <h3 id="dlg-title">Canvassing entry</h3>
+    <div class="field">
+      <label class="field-label" for="dlg-address">Address</label>
+      <input id="dlg-address" type="text" readonly>
+    </div>
+    <div class="field">
+      <span class="field-label">Status</span>
+      <div class="radio-row" id="dlg-status-group">
+        <label><input type="radio" name="dlg-status" value="NH"> NH</label>
+        <label><input type="radio" name="dlg-status" value="1"> 1</label>
+        <label><input type="radio" name="dlg-status" value="2"> 2</label>
+        <label><input type="radio" name="dlg-status" value="3"> 3</label>
+      </div>
+    </div>
+    <div class="field">
+      <span class="field-label">Yard sign / Volunteer</span>
+      <div class="checkbox-row" id="dlg-flags-group">
+        <label><input type="checkbox" id="dlg-yard-sign"> Yard sign</label>
+        <label><input type="checkbox" id="dlg-volunteer"> Volunteer</label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="dlg-note">Note</label>
+      <textarea id="dlg-note" placeholder="Notes from this visit&hellip;"></textarea>
+    </div>
+    <div id="dlg-meta"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="dlg-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="dlg-save" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ================== CONFIG ==================
+  // Paste the Web App URL you get from deploying apps-script/Code.gs
+  // (Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone).
+  var CONFIG = {
+    APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbw7SiYOrUjcMo6oCpOd7F-R7UiMDJ62rFC-WHV7E2h1lkAd9iupGtkA_oARazYAFyXuCw/exec",
+    CITY_BOUNDARY_URL: "data/city_boundary.geojson",
+    PARCELS_URL: "data/parcels.geojson",
+    SITEADD_FIELD: "SITEADD",
+    MAP_CENTER: [36.9791, -122.0330],
+    MAP_ZOOM: 14,
+    NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
+    NEIGHBORHOOD_ZOOM_PHONE: 18,     // further back on phones -- 19 and 20 both felt too tight on iPhone
+    PARCELS_MIN_ZOOM_DELTA: Math.log2(1 / 0.8),  // ~0.32 zoom levels = "20% closer" than the initial city-wide view
+    LABELS_MIN_ZOOM: 18     // street-level zoom where individual lots are distinguishable enough for house numbers
+  };
+
+  // Judge "phone" by the smaller viewport dimension so it stays correct
+  // across rotation (an iPhone is small in both orientations; an iPad or
+  // laptop is not).
+  function isPhoneSize() { return Math.min(window.innerWidth, window.innerHeight) <= 500; }
+  function getNeighborhoodZoom() { return isPhoneSize() ? CONFIG.NEIGHBORHOOD_ZOOM_PHONE : CONFIG.NEIGHBORHOOD_ZOOM_DESKTOP; }
+
+  var DEMO_MODE = !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0;
+  var demoEntries = {};   // address(lowercased) -> {status, note, updatedAt, updatedBy}   (demo mode only)
+  var demoUsers = {};     // username(lowercased) -> {password, displayName}                 (demo mode only)
+
+  // ================== STATE ==================
+  var map, boundaryLayer, parcelsLayer, addressMarker;
+  var parcelsVisible = false;      // parcels layer is withheld until zoomed in enough (see updateVisibleParcels)
+  var parcelsMinZoom = null;       // computed once the initial city-wide view is set
+  // address(lowercased) -> { addressExact, layers: [L.Layer,...], features: [...] }
+  // (grouped because a small number of addresses cover more than one parcel,
+  // e.g. adjacent lots recorded under the same site address)
+  var parcelIndex = {};
+  var statusData = {};         // address(lowercased) -> { status, note, updatedAt, updatedBy }
+  var selectedAddressKey = null;
+  var currentUser = null;      // { username, displayName }
+  var locateWatchId = null;
+  var locationMarker = null, accuracyCircle = null;
+
+  var STATUS_COLOR_HEX = { "NH": "#9AA7AE", "1": "#3FAE62", "2": "#E0B23F", "3": "#D1493F" };
+
+  // ================== UTIL ==================
+  function $(id) { return document.getElementById(id); }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function keyFor(addr) { return String(addr || "").trim().toLowerCase(); }
+
+  async function sha256Hex(text) {
+    var enc = new TextEncoder().encode(text);
+    var digest = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+
+  function apiGet(action, params) {
+    var url = new URL(CONFIG.APPS_SCRIPT_URL);
+    url.searchParams.set("action", action);
+    Object.keys(params || {}).forEach(function (k) { url.searchParams.set(k, params[k]); });
+    return fetch(url.toString()).then(function (r) { return r.json(); });
+  }
+  function apiPost(payload) {
+    // text/plain avoids a CORS preflight against Apps Script web apps.
+    return fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); });
+  }
+
+  // ================== LOGIN ==================
+  function initLoginNote() {
+    if (DEMO_MODE) {
+      $("login-config-note").textContent =
+        "Demo mode: the Apps Script backend isn't configured yet, so any username/password will work and nothing is saved to a real Sheet. See README.md.";
+    } else {
+      $("login-config-note").textContent = "";
+    }
+  }
+
+  $("login-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var username = $("login-username").value.trim();
+    var password = $("login-password").value;
+    var errorEl = $("login-error");
+    var submitBtn = $("login-submit");
+    errorEl.textContent = "";
+    if (!username || !password) return;
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Signing in\u2026";
+    try {
+      if (DEMO_MODE) {
+        currentUser = { username: username, displayName: username };
+      } else {
+        var hash = await sha256Hex(password);
+        var res = await apiPost({ action: "login", username: username, passwordHash: hash });
+        if (!res || !res.ok) {
+          errorEl.textContent = (res && res.error) || "Invalid username or password.";
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Log in";
+          return;
+        }
+        currentUser = { username: username, displayName: res.displayName || username };
+      }
+      sessionStorage.setItem("a4m_user", JSON.stringify(currentUser));
+      enterApp();
+    } catch (err) {
+      errorEl.textContent = "Could not reach the login server. Check your connection and try again.";
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Log in";
+    }
+  });
+
+  $("logout-btn").addEventListener("click", function () {
+    sessionStorage.removeItem("a4m_user");
+    location.reload();
+  });
+
+  function enterApp() {
+    $("login-overlay").classList.add("hide");
+    $("user-chip-name").textContent = currentUser.displayName || currentUser.username;
+    if (DEMO_MODE) $("demo-banner").classList.add("show");
+    $("main-layout").classList.toggle("with-banner", DEMO_MODE);
+    if (!map) {
+      $("loading-overlay").classList.add("show");
+      initMap();
+    }
+  }
+
+  function checkExistingSession() {
+    try {
+      var saved = sessionStorage.getItem("a4m_user");
+      if (saved) {
+        currentUser = JSON.parse(saved);
+        enterApp();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // ================== MAP ==================
+  function initMap() {
+    // preferCanvas: this app can be handed real parcel layers with many
+    // thousands of polygons; Canvas rendering stays smooth where SVG (the
+    // Leaflet default) bogs down.
+    // minZoom/zoomSnap/zoomDelta match the Voter Precinct Map webpage's map
+    // init (finer zoom steps, and a floor so you can't zoom out past the
+    // whole city). maxZoom stays 20 here (the precinct page used 19) since
+    // that's what the "zoom in on selection" feature you asked for earlier
+    // relies on for the desktop neighborhood zoom.
+    map = L.map("map", { zoomControl: true, preferCanvas: true, minZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
+
+    var streetsLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 20,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    var ESRI_ATTRIBUTION = "Imagery &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, and the GIS community";
+
+    var satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+
+    // Hybrid = satellite imagery + Esri's free reference overlays (roads with
+    // street names, place/city labels) stacked on top -- same free, no-API-key
+    // Esri service as the plain satellite layer, just combined into one group
+    // so it behaves as a single base-layer choice. This is the default view.
+    var hybridImagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+    var transportationLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+    var placeLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+    var hybridLayer = L.layerGroup([hybridImagery, transportationLabels, placeLabels]).addTo(map);
+
+    L.control.layers(
+      { "Hybrid": hybridLayer, "Satellite": satelliteLayer, "Streets": streetsLayer },
+      null,
+      { position: "topright" }
+    ).addTo(map);
+
+    addLocateControl();
+
+    map.on("click", function () { deselectParcel(); });
+    map.on("zoomend", updateVisibleParcels);
+    map.on("moveend", updateVisibleParcels);
+
+    Promise.all([
+      fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
+      fetch(CONFIG.PARCELS_URL).then(function (r) { return r.json(); }),
+      DEMO_MODE ? Promise.resolve({ ok: true, entries: [] }) : apiGet("all", {}).catch(function () { return { ok: true, entries: [] }; })
+    ]).then(function (results) {
+      var boundaryGeoJson = results[0];
+      var parcelsGeoJson = results[1];
+      var entriesRes = results[2];
+
+      if (entriesRes && entriesRes.ok && Array.isArray(entriesRes.entries)) {
+        entriesRes.entries.forEach(function (e) {
+          statusData[keyFor(e.address)] = { status: e.status, note: e.note, updatedAt: e.updatedAt, updatedBy: e.updatedBy };
+        });
+      }
+
+      addBoundaryDimming(boundaryGeoJson);
+      addParcels(parcelsGeoJson);
+      try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
+
+      // Parcels stay hidden until the viewer has zoomed in noticeably closer
+      // than this initial city-wide view -- 11k+ parcel outlines at a
+      // city-wide zoom is just clutter, and it's a lot to draw at once.
+      parcelsMinZoom = map.getZoom() + CONFIG.PARCELS_MIN_ZOOM_DELTA;
+      updateVisibleParcels();
+
+      $("loading-overlay").classList.remove("show");
+    }).catch(function (err) {
+      $("address-list").innerHTML = '<li class="empty-msg">Could not load map data: ' + escapeHtml(err.message || String(err)) + "</li>";
+      $("loading-overlay").classList.remove("show");
+    });
+  }
+
+  // Parcels are attached to the map one at a time, and only the ones near
+  // the current viewport -- not the whole 11k+ dataset at once. Even with
+  // strokes off, having every parcel in the city permanently registered
+  // with the renderer once you cross the zoom threshold is what was still
+  // making pan/zoom feel sluggish on iPhone: Leaflet has to walk every
+  // attached layer on every redraw. Capping that to "what's roughly on
+  // screen" (a padded viewport) keeps the attached count in the low
+  // hundreds regardless of city size.
+  function updateVisibleParcels() {
+    if (!parcelsLayer || parcelsMinZoom === null) return;
+    var zoom = map.getZoom();
+
+    if (zoom < parcelsMinZoom) {
+      if (parcelsVisible) {
+        Object.keys(parcelIndex).forEach(function (key) {
+          var entry = parcelIndex[key];
+          entry.layers.forEach(function (l) { if (l._map) map.removeLayer(l); });
+          removeNumberLabel(entry);
+        });
+        parcelsVisible = false;
+      }
+      return;
+    }
+    parcelsVisible = true;
+
+    var viewBounds = map.getBounds().pad(0.25); // 25% buffer so nearby parcels are ready just before they scroll into view
+    var showLabels = zoom >= CONFIG.LABELS_MIN_ZOOM;
+
+    Object.keys(parcelIndex).forEach(function (key) {
+      var entry = parcelIndex[key];
+      var anyInView = false;
+      entry.layers.forEach(function (l) {
+        if (!l.__cachedBounds) l.__cachedBounds = l.getBounds();
+        var inView = viewBounds.intersects(l.__cachedBounds);
+        if (inView) anyInView = true;
+        if (inView && !l._map) map.addLayer(l);
+        else if (!inView && l._map) map.removeLayer(l);
+      });
+
+      if (anyInView && showLabels && entry.numberText) {
+        addNumberLabel(entry);
+      } else {
+        removeNumberLabel(entry);
+      }
+    });
+  }
+
+  // House-number labels ride the same visibility pass as the parcel
+  // polygons above -- only ever a few dozen exist at once, drawn from the
+  // SITEADD data we already have (no external dataset needed).
+  function addNumberLabel(entry) {
+    if (entry.labelMarker) return;
+    var center;
+    try { center = groupBounds(entry).getCenter(); } catch (e) { return; }
+    entry.labelMarker = L.marker(center, {
+      icon: L.divIcon({ className: "parcel-number-label", html: "<span>" + escapeHtml(entry.numberText) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
+      interactive: false,
+      keyboard: false
+    }).addTo(map);
+  }
+
+  function removeNumberLabel(entry) {
+    if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
+  }
+
+  // ================== MY LOCATION ==================
+  function addLocateControl() {
+    var LocateControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var container = L.DomUtil.create("div", "leaflet-bar leaflet-control locate-control");
+        var link = L.DomUtil.create("a", "locate-control-link", container);
+        link.href = "#";
+        link.title = "Show my location";
+        link.setAttribute("role", "button");
+        link.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+          '<circle cx="12" cy="12" r="3"></circle>' +
+          '<path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>';
+        L.DomEvent.on(link, "click", L.DomEvent.stop).on(link, "click", function () {
+          toggleLocate(link);
+        });
+        return container;
+      }
+    });
+    map.addControl(new LocateControl());
+  }
+
+  function toggleLocate(linkEl) {
+    if (locateWatchId !== null) {
+      navigator.geolocation.clearWatch(locateWatchId);
+      locateWatchId = null;
+      if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+      if (accuracyCircle) { map.removeLayer(accuracyCircle); accuracyCircle = null; }
+      linkEl.classList.remove("active");
+      return;
+    }
+    if (!navigator.geolocation) {
+      alert("Location isn't available in this browser.");
+      return;
+    }
+    if (window.isSecureContext === false) {
+      // Browsers refuse geolocation on plain http:// (localhost is exempt),
+      // which otherwise surfaces as a confusing generic error below.
+      alert("Location requires a secure (https://) page, or testing at http://localhost. This page is currently loaded over plain http, so the browser blocks location access.");
+      return;
+    }
+    linkEl.classList.add("active");
+    var firstFix = true;
+    locateWatchId = navigator.geolocation.watchPosition(
+      function (pos) {
+        var latlng = [pos.coords.latitude, pos.coords.longitude];
+        if (!locationMarker) {
+          locationMarker = L.marker(latlng, {
+            icon: L.divIcon({ className: "user-location-marker", html: '<div class="user-location-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
+            zIndexOffset: 2000,
+            interactive: false
+          }).addTo(map);
+          accuracyCircle = L.circle(latlng, {
+            radius: pos.coords.accuracy,
+            color: "#1257FF",
+            weight: 1,
+            fillColor: "#1257FF",
+            fillOpacity: 0.08,
+            interactive: false
+          }).addTo(map);
+        } else {
+          locationMarker.setLatLng(latlng);
+          accuracyCircle.setLatLng(latlng);
+          accuracyCircle.setRadius(pos.coords.accuracy);
+        }
+        if (firstFix) {
+          map.setView(latlng, Math.max(map.getZoom(), 16));
+          firstFix = false;
+        }
+      },
+      function (err) {
+        linkEl.classList.remove("active");
+        locateWatchId = null;
+        var msg = "Could not get your location: " + err.message;
+        if (err.code === 1) {
+          // PERMISSION_DENIED -- this is the browser's own per-site setting,
+          // not something the app controls. Point people at the fix instead
+          // of leaving them stuck on the raw browser message.
+          msg += "\n\nYour browser has location blocked for this page. Look for a location/lock icon in the address bar, open its site permissions, and set Location to Allow, then try again. On a phone, also check that Location Services is turned on for that browser under your device's system Settings.";
+        }
+        alert(msg);
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    );
+  }
+
+  function addBoundaryDimming(boundaryGeoJson) {
+    var mask;
+    try {
+      mask = turf.mask(boundaryGeoJson);
+    } catch (e) {
+      console.warn("Could not build dim mask from city boundary; skipping dim overlay.", e);
+      return;
+    }
+    // Matches the Voter Precinct Map webpage's cityMaskLayer/cityGlowLayer values.
+    boundaryLayer = L.geoJSON(mask, {
+      interactive: false,
+      style: { stroke: false, fillColor: "#08101a", fillOpacity: 0.3 }
+    }).addTo(map);
+    // Outline the actual city boundary on top for clarity.
+    L.geoJSON(boundaryGeoJson, {
+      interactive: false,
+      style: { color: "#000000", weight: 2.5, opacity: 1, fill: false }
+    }).addTo(map);
+  }
+
+  function getAddr(feature) {
+    return feature && feature.properties ? feature.properties[CONFIG.SITEADD_FIELD] : null;
+  }
+
+  function styleForKey(key) {
+    var entry = statusData[key];
+    var isSelected = key && key === selectedAddressKey;
+    var status = entry && entry.status;
+    return {
+      // Outlines are skipped entirely except on the selected parcel --
+      // stroking 10k+ paths is the expensive part of drawing this layer on
+      // lower-powered devices, and the fill alone is enough to read the
+      // parcels; only the current selection needs a border.
+      stroke: isSelected,
+      color: "#1257FF",
+      weight: isSelected ? 3 : 0,
+      opacity: 1,
+      fillColor: status ? STATUS_COLOR_HEX[status] : "#4A6577",
+      fillOpacity: status ? 0.55 : (isSelected ? 0.3 : 0.12)
+    };
+  }
+
+  function parcelStyle(feature) {
+    var addr = getAddr(feature);
+    return styleForKey(keyFor(addr));
+  }
+
+  // Restyle just the handful of layers belonging to one address, instead of
+  // walking the whole 11k+-feature dataset. Selecting/deselecting only ever
+  // changes the look of (at most) two addresses, so there's no reason to
+  // touch the rest -- doing so was the main source of the lag reported on
+  // iPhone between tapping an address and seeing it highlight.
+  function restyleEntry(key) {
+    var entry = parcelIndex[key];
+    if (!entry) return;
+    var style = styleForKey(key);
+    entry.layers.forEach(function (l) { l.setStyle(style); });
+  }
+
+  function addParcels(parcelsGeoJson) {
+    parcelsLayer = L.geoJSON(parcelsGeoJson, {
+      style: parcelStyle,
+      onEachFeature: function (feature, layer) {
+        var addr = getAddr(feature);
+        if (!addr) return;
+        var key = keyFor(addr);
+        if (!parcelIndex[key]) {
+          var numMatch = addr.match(/^(\d+[A-Za-z]?)/);
+          parcelIndex[key] = { addressExact: addr, layers: [], features: [], numberText: numMatch ? numMatch[1] : "", labelMarker: null };
+        }
+        parcelIndex[key].layers.push(layer);
+        parcelIndex[key].features.push(feature);
+        layer.on("click", function (e) {
+          L.DomEvent.stopPropagation(e);
+          selectParcel(key);
+        });
+      }
+    });
+    // Not added to the map yet -- updateVisibleParcels() reveals nearby ones once
+    // the viewer has zoomed in past parcelsMinZoom.
+
+    buildAddressList();
+  }
+
+  // ================== ADDRESS LIST ==================
+  function buildAddressList(filterText) {
+    var listEl = $("address-list");
+    var keys = Object.keys(parcelIndex);
+    var addresses = keys.map(function (k) { return parcelIndex[k].addressExact; });
+    addresses.sort(function (a, b) { return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }); });
+
+    var q = (filterText || "").trim().toLowerCase();
+    if (q) addresses = addresses.filter(function (a) { return a.toLowerCase().indexOf(q) !== -1; });
+
+    if (!addresses.length) {
+      listEl.innerHTML = '<li class="empty-msg">No addresses match your search.</li>';
+    } else {
+      // Build one HTML string and set it in a single pass -- with datasets
+      // that run into the thousands, appendChild-per-row is noticeably
+      // slower than a single innerHTML assignment.
+      // Status colors are shown on the map (parcel fill) but intentionally
+      // not repeated here in the list.
+      var html = new Array(addresses.length);
+      for (var i = 0; i < addresses.length; i++) {
+        var addr = addresses[i];
+        var key = keyFor(addr);
+        html[i] = '<li data-key="' + escapeHtml(key) + '"' + (key === selectedAddressKey ? ' class="active"' : "") + '>' +
+          "<span>" + escapeHtml(addr) + "</span></li>";
+      }
+      listEl.innerHTML = html.join("");
+    }
+    $("count-footer").textContent = keys.length + " address" + (keys.length === 1 ? "" : "es") + (q ? " \u2022 " + addresses.length + " match" + (addresses.length === 1 ? "" : "es") : "");
+  }
+
+  // Event delegation: one listener for the whole list instead of one per
+  // row, which matters once the list has thousands of rows.
+  $("address-list").addEventListener("click", function (e) {
+    var li = e.target.closest("li[data-key]");
+    if (li) selectParcel(li.dataset.key, { fromList: true });
+  });
+
+  $("search-input").addEventListener("input", function () {
+    buildAddressList(this.value);
+  });
+
+  // ================== SELECTION ==================
+  function selectParcel(key, opts) {
+    opts = opts || {};
+    var entry = parcelIndex[key];
+    if (!entry) return;
+
+    var previousKey = selectedAddressKey;
+    selectedAddressKey = key;
+
+    // Cheap, purely-DOM feedback first: the list highlight and the address
+    // button must appear the instant the user taps, not after any map or
+    // style work. Everything below this point is allowed to take longer.
+    highlightListItem(key);
+    showAddressButton(entry);
+
+    if (!opts.fromList) {
+      // Selection triggered by clicking the map shape itself: make sure the
+      // list scrolls to it too.
+      var li = document.querySelector('#address-list li[data-key="' + cssEscape(key) + '"]');
+      if (li) li.scrollIntoView({ block: "nearest" });
+    }
+
+    // Restyle only the two affected addresses (old selection + new one)
+    // instead of the whole parcel layer.
+    if (previousKey && previousKey !== key) restyleEntry(previousKey);
+    restyleEntry(key);
+
+    // Zoom into the neighborhood around the selected parcel, whichever way
+    // it was selected -- never zooms back out, just in and/or recenters.
+    try {
+      var b = groupBounds(entry);
+      if (b && b.isValid()) {
+        var targetZoom = Math.max(map.getZoom(), getNeighborhoodZoom());
+        map.flyTo(b.getCenter(), targetZoom, { duration: 0.6 });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function groupBounds(entry) {
+    var group = L.featureGroup(entry.layers);
+    return group.getBounds();
+  }
+
+  function cssEscape(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"); }
+
+  function deselectParcel() {
+    var previousKey = selectedAddressKey;
+    selectedAddressKey = null;
+    highlightListItem(null);
+    removeAddressButton();
+    if (previousKey) restyleEntry(previousKey);
+  }
+
+  function highlightListItem(key) {
+    document.querySelectorAll("#address-list li").forEach(function (li) {
+      li.classList.toggle("active", key && li.dataset.key === key);
+    });
+  }
+
+  function removeAddressButton() {
+    if (addressMarker) { map.removeLayer(addressMarker); addressMarker = null; }
+  }
+
+  function showAddressButton(entry) {
+    removeAddressButton();
+    var latlng;
+    try {
+      var b = groupBounds(entry);
+      latlng = b.getCenter();
+      entry.layers.forEach(function (l) { if (l.bringToFront) l.bringToFront(); });
+    } catch (e) { return; }
+
+    var icon = L.divIcon({
+      className: "address-marker",
+      html: '<button type="button" class="address-btn">' + escapeHtml(entry.addressExact) + "</button>",
+      iconSize: null,
+      iconAnchor: [0, 0]
+    });
+    addressMarker = L.marker(latlng, { icon: icon, zIndexOffset: 1000, interactive: true }).addTo(map);
+    var el = addressMarker.getElement();
+    if (el) {
+      var btn = el.querySelector(".address-btn");
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        openDialog(entry);
+      });
+    }
+  }
+
+  // ================== EDIT DIALOG ==================
+  var dialogEntry = null;
+
+  async function openDialog(entry) {
+    dialogEntry = entry;
+    $("dlg-address").value = entry.addressExact;
+    $("dlg-note").value = "";
+    $("dlg-meta").textContent = "";
+    document.querySelectorAll('#dlg-status-group input[type="radio"]').forEach(function (r) { r.checked = false; });
+    $("dlg-yard-sign").checked = false;
+    $("dlg-volunteer").checked = false;
+
+    $("dialog-overlay").classList.add("show");
+    $("dlg-save").disabled = true;
+    $("dlg-save").textContent = "Loading\u2026";
+
+    var key = keyFor(entry.addressExact);
+    try {
+      var existing = statusData[key];
+      if (!DEMO_MODE) {
+        var res = await apiGet("entry", { address: entry.addressExact });
+        if (res && res.ok && res.entry) existing = res.entry;
+      } else if (demoEntries[key]) {
+        existing = demoEntries[key];
+      }
+      populateDialog(existing);
+    } catch (e) {
+      $("dlg-meta").textContent = "Could not load existing data for this address.";
+    } finally {
+      $("dlg-save").disabled = false;
+      $("dlg-save").textContent = "Save";
+    }
+  }
+
+  function populateDialog(existing) {
+    if (!existing) return;
+    if (existing.status) {
+      var radio = document.querySelector('#dlg-status-group input[value="' + existing.status + '"]');
+      if (radio) radio.checked = true;
+    }
+    if (existing.note) $("dlg-note").value = existing.note;
+    $("dlg-yard-sign").checked = !!existing.yardSign;
+    $("dlg-volunteer").checked = !!existing.volunteer;
+    if (existing.updatedAt) {
+      var when = new Date(existing.updatedAt);
+      var whenText = isNaN(when.getTime()) ? existing.updatedAt : when.toLocaleString();
+      $("dlg-meta").textContent = "Last updated " + whenText + (existing.updatedBy ? " by " + existing.updatedBy : "");
+    }
+  }
+
+  function closeDialog() {
+    $("dialog-overlay").classList.remove("show");
+    dialogEntry = null;
+  }
+
+  $("dlg-cancel").addEventListener("click", closeDialog);
+  $("dialog-overlay").addEventListener("click", function (e) {
+    if (e.target === $("dialog-overlay")) closeDialog();
+  });
+
+  $("dlg-save").addEventListener("click", async function () {
+    if (!dialogEntry) return;
+    var statusEl = document.querySelector('#dlg-status-group input[type="radio"]:checked');
+    var status = statusEl ? statusEl.value : "";
+    var note = $("dlg-note").value;
+    var yardSign = $("dlg-yard-sign").checked;
+    var volunteer = $("dlg-volunteer").checked;
+    var addr = dialogEntry.addressExact;
+    var key = keyFor(addr);
+
+    if (!status) { $("dlg-meta").textContent = "Choose a status before saving."; return; }
+
+    var saveBtn = $("dlg-save");
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving\u2026";
+    try {
+      var nowIso = new Date().toISOString();
+      if (DEMO_MODE) {
+        demoEntries[key] = { status: status, note: note, yardSign: yardSign, volunteer: volunteer, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        statusData[key] = demoEntries[key];
+      } else {
+        var res = await apiPost({
+          action: "save",
+          address: addr,
+          status: status,
+          note: note,
+          yardSign: yardSign,
+          volunteer: volunteer,
+          username: currentUser.username
+        });
+        if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
+        statusData[key] = { status: status, note: note, yardSign: yardSign, volunteer: volunteer, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+      }
+      restyleEntry(key);
+      buildAddressList($("search-input").value);
+      closeDialog();
+    } catch (e) {
+      $("dlg-meta").textContent = "Could not save: " + (e.message || e);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && $("dialog-overlay").classList.contains("show")) closeDialog();
+  });
+
+  // ================== BOOT ==================
+  initLoginNote();
+  checkExistingSession();
+})();
+</script>
+</body>
+</html>
