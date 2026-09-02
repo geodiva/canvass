@@ -674,6 +674,15 @@
     errorEl.textContent = "";
     if (!username || !password) return;
 
+    if (!DEMO_MODE && (!window.crypto || !window.crypto.subtle)) {
+      // crypto.subtle (used to hash the password before sending it) only
+      // exists on secure origins -- https://, or http://localhost. On a
+      // plain http:// page it's simply undefined, which otherwise surfaces
+      // as a misleading "could not reach the server" message below.
+      errorEl.textContent = "Logging in requires a secure (https://) page. This page is currently loaded over plain http, so the browser won't allow password hashing.";
+      return;
+    }
+
     submitBtn.disabled = true;
     submitBtn.textContent = "Signing in\u2026";
     try {
