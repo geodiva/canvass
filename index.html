@@ -26,10 +26,10 @@
     --danger: #C0392B;
     --shadow: 0 12px 32px -12px rgba(28,43,56,0.28);
 
-    --status-nh: #9AA7AE;
-    --status-1: #3FAE62;
-    --status-2: #E0B23F;
-    --status-3: #D1493F;
+    --status-nh: #3B82F6;
+    --status-supports: #3FAE62;
+    --status-undecided: #E0B23F;
+    --status-opposed: #D1493F;
     --status-none-fill: #4A6577;
   }
 
@@ -386,14 +386,14 @@
   }
   .radio-row input[type="radio"] { accent-color: var(--select); }
   .radio-row label:has(input:checked) { font-weight: 600; }
-  .radio-row label:has(input[value="NH"]) { border-color: #9AA7AE; }
-  .radio-row label:has(input[value="Supports"]) { border-color: #3FAE62; }
-  .radio-row label:has(input[value="Undecided"]) { border-color: #E0B23F; }
-  .radio-row label:has(input[value="Opposed"]) { border-color: #D1493F; }
-  .radio-row label:has(input[value="NH"]:checked) { background: color-mix(in srgb, #9AA7AE 22%, transparent); }
-  .radio-row label:has(input[value="Supports"]:checked) { background: color-mix(in srgb, #3FAE62 22%, transparent); }
-  .radio-row label:has(input[value="Undecided"]:checked) { background: color-mix(in srgb, #E0B23F 22%, transparent); }
-  .radio-row label:has(input[value="Opposed"]:checked) { background: color-mix(in srgb, #D1493F 22%, transparent); }
+  .radio-row label:has(input[value="NH"]) { border-color: var(--status-nh); }
+  .radio-row label:has(input[value="Supports"]) { border-color: var(--status-supports); }
+  .radio-row label:has(input[value="Undecided"]) { border-color: var(--status-undecided); }
+  .radio-row label:has(input[value="Opposed"]) { border-color: var(--status-opposed); }
+  .radio-row label:has(input[value="NH"]:checked) { background: color-mix(in srgb, var(--status-nh) 22%, transparent); }
+  .radio-row label:has(input[value="Supports"]:checked) { background: color-mix(in srgb, var(--status-supports) 22%, transparent); }
+  .radio-row label:has(input[value="Undecided"]:checked) { background: color-mix(in srgb, var(--status-undecided) 22%, transparent); }
+  .radio-row label:has(input[value="Opposed"]:checked) { background: color-mix(in srgb, var(--status-opposed) 22%, transparent); }
   .checkbox-row { display: flex; gap: 6px; flex-wrap: wrap; }
   .checkbox-row label {
     display: flex;
@@ -568,10 +568,10 @@
     </div>
     <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
     <div class="status-legend" id="status-legend">
-      <div class="legend-row"><span class="legend-swatch" style="background:#9AA7AE"></span><span class="legend-label">NH</span><span class="legend-count" id="legend-count-NH">0</span></div>
-      <div class="legend-row"><span class="legend-swatch" style="background:#3FAE62"></span><span class="legend-label">Supports</span><span class="legend-count" id="legend-count-Supports">0</span></div>
-      <div class="legend-row"><span class="legend-swatch" style="background:#E0B23F"></span><span class="legend-label">Undecided</span><span class="legend-count" id="legend-count-Undecided">0</span></div>
-      <div class="legend-row"><span class="legend-swatch" style="background:#D1493F"></span><span class="legend-label">Opposed</span><span class="legend-count" id="legend-count-Opposed">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-nh)"></span><span class="legend-label">NH</span><span class="legend-count" id="legend-count-NH">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-supports)"></span><span class="legend-label">Supports</span><span class="legend-count" id="legend-count-Supports">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-undecided)"></span><span class="legend-label">Undecided</span><span class="legend-count" id="legend-count-Undecided">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-opposed)"></span><span class="legend-label">Opposed</span><span class="legend-count" id="legend-count-Opposed">0</span></div>
     </div>
     <div class="sidebar-footer" id="count-footer">&nbsp;</div>
   </aside>
@@ -658,13 +658,27 @@
   // (grouped because a small number of addresses cover more than one parcel,
   // e.g. adjacent lots recorded under the same site address)
   var parcelIndex = {};
-  var statusData = {};         // address(lowercased) -> { status, note, updatedAt, updatedBy }
+  var statusData = {};         // address(lowercased) -> { status, note, yardSign, volunteer, updatedAt, updatedBy }
+  var lastSyncAt = null;       // server timestamp of the last successful full/partial data fetch
+  var SYNC_POLL_MS = 60000;    // how often to check the Sheet for other canvassers' updates
   var selectedAddressKey = null;
   var currentUser = null;      // { username, displayName }
   var locateWatchId = null;
   var locationMarker = null, accuracyCircle = null;
 
-  var STATUS_COLOR_HEX = { "NH": "#9AA7AE", "Supports": "#3FAE62", "Undecided": "#E0B23F", "Opposed": "#D1493F" };
+  // Pulled from the CSS custom properties in :root, so a color only ever
+  // has to change in one place (the stylesheet) and the map fill, list
+  // dots, legend swatches, and dialog radio buttons all stay in sync.
+  function cssVar(name, fallback) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  var STATUS_COLOR_HEX = {
+    "NH": cssVar("--status-nh", "#3B82F6"),
+    "Supports": cssVar("--status-supports", "#3FAE62"),
+    "Undecided": cssVar("--status-undecided", "#E0B23F"),
+    "Opposed": cssVar("--status-opposed", "#D1493F")
+  };
 
   // ================== UTIL ==================
   function $(id) { return document.getElementById(id); }
@@ -837,7 +851,7 @@
     Promise.all([
       fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
       fetch(CONFIG.PARCELS_URL).then(function (r) { return r.json(); }),
-      DEMO_MODE ? Promise.resolve({ ok: true, entries: [] }) : apiGet("all", {}).catch(function () { return { ok: true, entries: [] }; })
+      DEMO_MODE ? Promise.resolve({ ok: true, entries: [], serverTime: new Date().toISOString() }) : apiGet("all", {}).catch(function () { return { ok: true, entries: [], serverTime: new Date().toISOString() }; })
     ]).then(function (results) {
       var boundaryGeoJson = results[0];
       var parcelsGeoJson = results[1];
@@ -845,9 +859,10 @@
 
       if (entriesRes && entriesRes.ok && Array.isArray(entriesRes.entries)) {
         entriesRes.entries.forEach(function (e) {
-          statusData[keyFor(e.address)] = { status: e.status, note: e.note, updatedAt: e.updatedAt, updatedBy: e.updatedBy };
+          statusData[keyFor(e.address)] = { status: e.status, note: e.note, yardSign: e.yardSign, volunteer: e.volunteer, updatedAt: e.updatedAt, updatedBy: e.updatedBy };
         });
       }
+      lastSyncAt = (entriesRes && entriesRes.serverTime) || new Date().toISOString();
 
       addBoundaryDimming(boundaryGeoJson);
       addParcels(parcelsGeoJson);
@@ -860,10 +875,40 @@
       updateVisibleParcels();
 
       $("loading-overlay").classList.remove("show");
+
+      // Other canvassers may be updating the same Sheet at the same time --
+      // periodically pull just what's changed since our last check (instead
+      // of re-fetching everything) and quietly patch it in.
+      if (!DEMO_MODE) setInterval(pollForUpdates, SYNC_POLL_MS);
     }).catch(function (err) {
       $("address-list").innerHTML = '<li class="empty-msg">Could not load map data: ' + escapeHtml(err.message || String(err)) + "</li>";
       $("loading-overlay").classList.remove("show");
     });
+  }
+
+  // Pulls only the Data rows updated since our last check and patches them
+  // into statusData -- keeps everyone's map/list/legend in sync with what
+  // other canvassers are recording, without re-fetching the whole dataset.
+  function pollForUpdates() {
+    apiGet("since", { since: lastSyncAt }).then(function (res) {
+      if (!res || !res.ok || !Array.isArray(res.entries)) return;
+      var anySkipped = false;
+      if (res.entries.length) {
+        res.entries.forEach(function (e) {
+          var key = keyFor(e.address);
+          // If this address's dialog is open right now, leave it alone --
+          // don't overwrite what the user is actively looking at/editing.
+          // Also hold back the sync watermark so this entry gets picked up
+          // again on a later poll once the dialog is closed, instead of
+          // being silently skipped forever.
+          if (dialogEntry && key === keyFor(dialogEntry.addressExact)) { anySkipped = true; return; }
+          statusData[key] = { status: e.status, note: e.note, yardSign: e.yardSign, volunteer: e.volunteer, updatedAt: e.updatedAt, updatedBy: e.updatedBy };
+          restyleEntry(key);
+        });
+        buildAddressList($("search-input").value);
+      }
+      if (res.serverTime && !anySkipped) lastSyncAt = res.serverTime;
+    }).catch(function () { /* silent -- the next poll will just try again */ });
   }
 
   // Parcels are attached to the map one at a time, and only the ones near
