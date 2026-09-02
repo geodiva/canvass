@@ -209,7 +209,7 @@
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 8px;
   }
   #address-list li:hover { background: var(--paper); }
@@ -219,6 +219,12 @@
     font-weight: 600;
   }
   #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
 
   .sidebar-footer {
     padding: 8px 14px;
@@ -226,6 +232,29 @@
     font-size: 0.72rem;
     color: var(--muted);
   }
+
+  .status-legend {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: var(--ink);
+  }
+  .legend-swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .legend-label { flex: 1; }
+  .legend-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 
   /* ---------- map address button ---------- */
   /* ---------- base layer switcher ---------- */
@@ -356,11 +385,15 @@
     cursor: pointer;
   }
   .radio-row input[type="radio"] { accent-color: var(--select); }
-  .radio-row label:has(input:checked) {
-    border-color: var(--select);
-    background: color-mix(in srgb, var(--select) 12%, transparent);
-    font-weight: 600;
-  }
+  .radio-row label:has(input:checked) { font-weight: 600; }
+  .radio-row label:has(input[value="NH"]) { border-color: #9AA7AE; }
+  .radio-row label:has(input[value="Supports"]) { border-color: #3FAE62; }
+  .radio-row label:has(input[value="Undecided"]) { border-color: #E0B23F; }
+  .radio-row label:has(input[value="Opposed"]) { border-color: #D1493F; }
+  .radio-row label:has(input[value="NH"]:checked) { background: color-mix(in srgb, #9AA7AE 22%, transparent); }
+  .radio-row label:has(input[value="Supports"]:checked) { background: color-mix(in srgb, #3FAE62 22%, transparent); }
+  .radio-row label:has(input[value="Undecided"]:checked) { background: color-mix(in srgb, #E0B23F 22%, transparent); }
+  .radio-row label:has(input[value="Opposed"]:checked) { background: color-mix(in srgb, #D1493F 22%, transparent); }
   .checkbox-row { display: flex; gap: 6px; flex-wrap: wrap; }
   .checkbox-row label {
     display: flex;
@@ -482,12 +515,14 @@
     main.layout { flex-direction: column; }
     aside.sidebar { width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
     #map { flex: 0 0 auto; height: 50vh; }
+    .status-legend { display: none; }
   }
 
   /* Phone, landscape: keep the side-by-side layout (map left, panel right)
      instead of stacking -- just trim the panel width for short screens. */
   @media (max-height: 500px) and (orientation: landscape) {
     aside.sidebar { width: 260px; }
+    .status-legend { display: none; }
   }
 </style>
 </head>
@@ -532,6 +567,12 @@
       <input id="search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
     </div>
     <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
+    <div class="status-legend" id="status-legend">
+      <div class="legend-row"><span class="legend-swatch" style="background:#9AA7AE"></span><span class="legend-label">NH</span><span class="legend-count" id="legend-count-NH">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:#3FAE62"></span><span class="legend-label">Supports</span><span class="legend-count" id="legend-count-Supports">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:#E0B23F"></span><span class="legend-label">Undecided</span><span class="legend-count" id="legend-count-Undecided">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:#D1493F"></span><span class="legend-label">Opposed</span><span class="legend-count" id="legend-count-Opposed">0</span></div>
+    </div>
     <div class="sidebar-footer" id="count-footer">&nbsp;</div>
   </aside>
   <div id="loading-overlay">
@@ -552,9 +593,9 @@
       <span class="field-label">Status</span>
       <div class="radio-row" id="dlg-status-group">
         <label><input type="radio" name="dlg-status" value="NH"> NH</label>
-        <label><input type="radio" name="dlg-status" value="1"> 1</label>
-        <label><input type="radio" name="dlg-status" value="2"> 2</label>
-        <label><input type="radio" name="dlg-status" value="3"> 3</label>
+        <label><input type="radio" name="dlg-status" value="Supports"> Supports</label>
+        <label><input type="radio" name="dlg-status" value="Undecided"> Undecided</label>
+        <label><input type="radio" name="dlg-status" value="Opposed"> Opposed</label>
       </div>
     </div>
     <div class="field">
@@ -623,7 +664,7 @@
   var locateWatchId = null;
   var locationMarker = null, accuracyCircle = null;
 
-  var STATUS_COLOR_HEX = { "NH": "#9AA7AE", "1": "#3FAE62", "2": "#E0B23F", "3": "#D1493F" };
+  var STATUS_COLOR_HEX = { "NH": "#9AA7AE", "Supports": "#3FAE62", "Undecided": "#E0B23F", "Opposed": "#D1493F" };
 
   // ================== UTIL ==================
   function $(id) { return document.getElementById(id); }
@@ -1077,18 +1118,35 @@
       // Build one HTML string and set it in a single pass -- with datasets
       // that run into the thousands, appendChild-per-row is noticeably
       // slower than a single innerHTML assignment.
-      // Status colors are shown on the map (parcel fill) but intentionally
-      // not repeated here in the list.
       var html = new Array(addresses.length);
       for (var i = 0; i < addresses.length; i++) {
         var addr = addresses[i];
         var key = keyFor(addr);
+        var entry = statusData[key];
+        var dotColor = entry && entry.status ? STATUS_COLOR_HEX[entry.status] : "transparent";
         html[i] = '<li data-key="' + escapeHtml(key) + '"' + (key === selectedAddressKey ? ' class="active"' : "") + '>' +
+          '<span class="status-dot" style="background:' + dotColor + '"></span>' +
           "<span>" + escapeHtml(addr) + "</span></li>";
       }
       listEl.innerHTML = html.join("");
     }
     $("count-footer").textContent = keys.length + " address" + (keys.length === 1 ? "" : "es") + (q ? " \u2022 " + addresses.length + " match" + (addresses.length === 1 ? "" : "es") : "");
+    renderLegend();
+  }
+
+  // Counts every canvassed address by status, regardless of the current
+  // search filter, and updates the legend panel. Called whenever the list
+  // is rebuilt (initial load and after every save), so it stays live.
+  function renderLegend() {
+    var counts = { NH: 0, Supports: 0, Undecided: 0, Opposed: 0 };
+    Object.keys(parcelIndex).forEach(function (key) {
+      var entry = statusData[key];
+      if (entry && entry.status && counts.hasOwnProperty(entry.status)) counts[entry.status]++;
+    });
+    Object.keys(counts).forEach(function (status) {
+      var el = $("legend-count-" + status);
+      if (el) el.textContent = counts[status];
+    });
   }
 
   // Event delegation: one listener for the whole list instead of one per
