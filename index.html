@@ -386,11 +386,11 @@
   }
   .radio-row input[type="radio"] { accent-color: var(--select); }
   .radio-row label:has(input:checked) { font-weight: 600; }
-  .radio-row label:has(input[value="NH"]) { border-color: var(--status-nh); }
+  .radio-row label:has(input[value="Not home"]) { border-color: var(--status-nh); }
   .radio-row label:has(input[value="Supports"]) { border-color: var(--status-supports); }
   .radio-row label:has(input[value="Undecided"]) { border-color: var(--status-undecided); }
   .radio-row label:has(input[value="Opposed"]) { border-color: var(--status-opposed); }
-  .radio-row label:has(input[value="NH"]:checked) { background: color-mix(in srgb, var(--status-nh) 22%, transparent); }
+  .radio-row label:has(input[value="Not home"]:checked) { background: color-mix(in srgb, var(--status-nh) 22%, transparent); }
   .radio-row label:has(input[value="Supports"]:checked) { background: color-mix(in srgb, var(--status-supports) 22%, transparent); }
   .radio-row label:has(input[value="Undecided"]:checked) { background: color-mix(in srgb, var(--status-undecided) 22%, transparent); }
   .radio-row label:has(input[value="Opposed"]:checked) { background: color-mix(in srgb, var(--status-opposed) 22%, transparent); }
@@ -568,7 +568,7 @@
     </div>
     <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
     <div class="status-legend" id="status-legend">
-      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-nh)"></span><span class="legend-label">NH</span><span class="legend-count" id="legend-count-NH">0</span></div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-nh)"></span><span class="legend-label">Not home</span><span class="legend-count" id="legend-count-NH">0</span></div>
       <div class="legend-row"><span class="legend-swatch" style="background:var(--status-supports)"></span><span class="legend-label">Supports</span><span class="legend-count" id="legend-count-Supports">0</span></div>
       <div class="legend-row"><span class="legend-swatch" style="background:var(--status-undecided)"></span><span class="legend-label">Undecided</span><span class="legend-count" id="legend-count-Undecided">0</span></div>
       <div class="legend-row"><span class="legend-swatch" style="background:var(--status-opposed)"></span><span class="legend-label">Opposed</span><span class="legend-count" id="legend-count-Opposed">0</span></div>
@@ -592,7 +592,7 @@
     <div class="field">
       <span class="field-label">Status</span>
       <div class="radio-row" id="dlg-status-group">
-        <label><input type="radio" name="dlg-status" value="NH"> NH</label>
+        <label><input type="radio" name="dlg-status" value="Not home"> Not home</label>
         <label><input type="radio" name="dlg-status" value="Supports"> Supports</label>
         <label><input type="radio" name="dlg-status" value="Undecided"> Undecided</label>
         <label><input type="radio" name="dlg-status" value="Opposed"> Opposed</label>
@@ -674,7 +674,7 @@
     return v || fallback;
   }
   var STATUS_COLOR_HEX = {
-    "NH": cssVar("--status-nh", "#3B82F6"),
+    "Not home": cssVar("--status-nh", "#3B82F6"),
     "Supports": cssVar("--status-supports", "#3FAE62"),
     "Undecided": cssVar("--status-undecided", "#E0B23F"),
     "Opposed": cssVar("--status-opposed", "#D1493F")
@@ -1183,13 +1183,15 @@
   // search filter, and updates the legend panel. Called whenever the list
   // is rebuilt (initial load and after every save), so it stays live.
   function renderLegend() {
-    var counts = { NH: 0, Supports: 0, Undecided: 0, Opposed: 0 };
+    var counts = { "Not home": 0, "Supports": 0, "Undecided": 0, "Opposed": 0 };
+    // DOM ids stay short/stable even though "Not home" has a space in it.
+    var legendIds = { "Not home": "NH", "Supports": "Supports", "Undecided": "Undecided", "Opposed": "Opposed" };
     Object.keys(parcelIndex).forEach(function (key) {
       var entry = statusData[key];
       if (entry && entry.status && counts.hasOwnProperty(entry.status)) counts[entry.status]++;
     });
     Object.keys(counts).forEach(function (status) {
-      var el = $("legend-count-" + status);
+      var el = $("legend-count-" + legendIds[status]);
       if (el) el.textContent = counts[status];
     });
   }
