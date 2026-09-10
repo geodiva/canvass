@@ -26,11 +26,13 @@
     --danger: #C0392B;
     --shadow: 0 12px 32px -12px rgba(28,43,56,0.28);
 
-    --status-nh: #3B82F6;
-    --status-supports: #3FAE62;
-    --status-undecided: #E0B23F;
-    --status-opposed: #D1493F;
-    --status-none-fill: #4A6577;
+    --parcel-fill: #4A6577;
+    --walked-color: #14181D;
+
+    --precinct-not-printed: #D1493F;
+    --precinct-printed: #E0B23F;
+    --precinct-partially-walked: #3FAE62;
+    --precinct-completed: #8E5FD1;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -136,6 +138,7 @@
   main.layout.with-banner { height: calc(100% - 52px - 24px); }
 
   #map { flex: 1; height: 100%; background: var(--paper); }
+  #map.walk-armed { cursor: crosshair; touch-action: none; }
 
   /* Kills the faint moving grid of hairline seams between adjacent map
      tiles that shows up mainly on mobile Safari/retina screens, worse when
@@ -181,7 +184,18 @@
     z-index: 10;
   }
 
-  .sidebar-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); }
+  /* Precinct list (top half) and Address list (bottom half) share the
+     sidebar, each independently scrollable. */
+  .sidebar-section {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .sidebar-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
 
   #search-input {
@@ -195,14 +209,15 @@
   }
   #search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-  #address-list {
+  #precinct-list, #address-list {
     flex: 1;
     overflow-y: auto;
     list-style: none;
     margin: 0;
     padding: 4px 0;
+    min-height: 0;
   }
-  #address-list li {
+  #precinct-list li, #address-list li {
     padding: 8px 14px;
     font-size: 0.85rem;
     cursor: pointer;
@@ -212,25 +227,29 @@
     justify-content: flex-start;
     gap: 8px;
   }
-  #address-list li:hover { background: var(--paper); }
-  #address-list li.active {
+  #precinct-list li:hover, #address-list li:hover { background: var(--paper); }
+  #precinct-list li.active, #address-list li.active {
     background: var(--select);
     color: #fff;
     font-weight: 600;
   }
-  #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
+  #precinct-list .empty-msg, #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
   .status-dot {
     width: 9px;
     height: 9px;
     border-radius: 50%;
     flex-shrink: 0;
   }
+  .precinct-id { font-family: "IBM Plex Mono", monospace; font-size: 0.82rem; }
+  .precinct-progress { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #precinct-list li.active .precinct-progress { color: #fff; opacity: 0.85; }
 
   .sidebar-footer {
     padding: 8px 14px;
     border-top: 1px solid var(--border);
     font-size: 0.72rem;
     color: var(--muted);
+    flex-shrink: 0;
   }
 
   .status-legend {
@@ -239,6 +258,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+    flex-shrink: 0;
   }
   .legend-row {
     display: flex;
@@ -256,7 +276,6 @@
   .legend-label { flex: 1; }
   .legend-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-  /* ---------- map address button ---------- */
   /* ---------- base layer switcher ---------- */
   .leaflet-control-layers {
     border-radius: 8px !important;
@@ -306,116 +325,57 @@
     pointer-events: none;
   }
 
-  .address-marker { background: transparent; border: none; }
-  .address-btn {
-    transform: translate(-50%, calc(-100% - 12px));
-    position: relative;
-    display: inline-block;
-    white-space: nowrap;
-    background: var(--accent);
-    color: var(--accent-ink);
-    border: none;
-    border-radius: 8px;
-    padding: 7px 12px;
-    font-size: 0.82rem;
-    font-weight: 700;
-    font-family: "Public Sans", sans-serif;
-    box-shadow: var(--shadow);
-    cursor: pointer;
-  }
-  .address-btn:hover { filter: brightness(1.06); }
-  .address-btn::after {
-    content: "";
+  /* ---------- floating precinct panel ---------- */
+  .precinct-panel {
     position: absolute;
-    left: 50%;
-    top: 100%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: var(--accent);
-  }
-
-  /* ---------- modal dialog ---------- */
-  #dialog-overlay {
-    position: fixed; inset: 0;
-    background: rgba(20, 30, 38, 0.45);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-  #dialog-overlay.show { display: flex; }
-
-  #edit-dialog {
-    width: 360px;
+    width: 300px;
     max-width: calc(100vw - 32px);
     background: var(--panel);
     border-radius: 12px;
     box-shadow: var(--shadow);
-    padding: 18px 18px 14px;
+    padding: 16px 16px 14px;
+    z-index: 900;
   }
-  #edit-dialog h3 { margin: 0 0 4px; font-size: 1rem; }
-  #edit-dialog .field { margin-top: 12px; }
-  #edit-dialog label.field-label {
+  .precinct-panel[hidden] { display: none; }
+  .precinct-panel h3 { margin: 0 0 2px; font-size: 0.98rem; }
+  .precinct-panel .field-label {
     display: block;
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     font-weight: 600;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
   }
-  #dlg-address {
-    width: 100%;
-    padding: 8px 10px;
-    border-radius: 8px;
+  .precinct-panel-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .precinct-panel-section:first-of-type { border-top: none; padding-top: 0; }
+
+  .precinct-status-row { display: flex; flex-direction: column; gap: 6px; }
+  .precinct-status-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
     background: var(--paper);
-    color: var(--muted);
-    font-size: 0.88rem;
+    color: var(--ink);
+    text-align: left;
   }
-  .radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
-  .radio-row label {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-size: 0.82rem;
-    cursor: pointer;
-  }
-  .radio-row input[type="radio"] { accent-color: var(--select); }
-  .radio-row label:has(input:checked) { font-weight: 600; }
-  .radio-row label:has(input[value="Not home"]) { border-color: var(--status-nh); }
-  .radio-row label:has(input[value="Supports"]) { border-color: var(--status-supports); }
-  .radio-row label:has(input[value="Undecided"]) { border-color: var(--status-undecided); }
-  .radio-row label:has(input[value="Opposed"]) { border-color: var(--status-opposed); }
-  .radio-row label:has(input[value="Not home"]:checked) { background: color-mix(in srgb, var(--status-nh) 22%, transparent); }
-  .radio-row label:has(input[value="Supports"]:checked) { background: color-mix(in srgb, var(--status-supports) 22%, transparent); }
-  .radio-row label:has(input[value="Undecided"]:checked) { background: color-mix(in srgb, var(--status-undecided) 22%, transparent); }
-  .radio-row label:has(input[value="Opposed"]:checked) { background: color-mix(in srgb, var(--status-opposed) 22%, transparent); }
-  .checkbox-row { display: flex; gap: 6px; flex-wrap: wrap; }
-  .checkbox-row label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-size: 0.82rem;
-    cursor: pointer;
-  }
-  .checkbox-row input[type="checkbox"] { accent-color: var(--select); }
-  .checkbox-row label:has(input:checked) {
-    border-color: var(--select);
-    background: color-mix(in srgb, var(--select) 12%, transparent);
-    font-weight: 600;
-  }
-  #dlg-note {
+  .precinct-status-btn .swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+  .precinct-status-btn[data-status="Not Yet Printed"] .swatch { background: var(--precinct-not-printed); }
+  .precinct-status-btn[data-status="Printed"] .swatch { background: var(--precinct-printed); }
+  .precinct-status-btn[data-status="Partially Walked"] .swatch { background: var(--precinct-partially-walked); }
+  .precinct-status-btn[data-status="Completed"] .swatch { background: var(--precinct-completed); }
+  .precinct-status-btn.active { font-weight: 600; border-color: var(--select); background: color-mix(in srgb, var(--select) 10%, var(--paper)); }
+
+  #precinct-completed-date-field { margin-top: 10px; }
+  #precinct-completed-date {
     width: 100%;
-    min-height: 84px;
-    resize: vertical;
-    padding: 8px 10px;
+    padding: 7px 10px;
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--paper);
@@ -423,7 +383,19 @@
     font-size: 0.85rem;
     font-family: inherit;
   }
-  #dlg-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
+  .walk-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .walk-toggle-row .swatch { width: 11px; height: 11px; border-radius: 3px; background: var(--walked-color); flex-shrink: 0; }
+  .walk-toggle-row input[type="checkbox"] { accent-color: var(--select); width: 16px; height: 16px; }
+  .walk-hint { margin: 6px 0 0; font-size: 0.76rem; color: var(--muted); }
+
+  #precinct-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
 
   .dialog-actions {
     display: flex;
@@ -509,8 +481,8 @@
   }
 
   /* Phone, portrait: stack map above list, but keep the map small so the
-     address list (the thing people are actually scrolling and tapping) gets
-     most of the screen. */
+     lists (the thing people are actually scrolling and tapping) get most
+     of the screen. */
   @media (max-width: 760px) and (orientation: portrait) {
     main.layout { flex-direction: column; }
     aside.sidebar { width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
@@ -562,60 +534,67 @@
 <main class="layout" id="main-layout">
   <div id="map"></div>
   <aside class="sidebar">
-    <div class="sidebar-header">
-      <h2>Address</h2>
-      <input id="search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>Precincts</h2>
+      </div>
+      <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
+      <div class="status-legend" id="precinct-legend">
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-not-printed)"></span><span class="legend-label">Not Yet Printed</span><span class="legend-count" id="legend-count-not-printed">0</span></div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-printed)"></span><span class="legend-label">Printed</span><span class="legend-count" id="legend-count-printed">0</span></div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-partially-walked)"></span><span class="legend-label">Partially Walked</span><span class="legend-count" id="legend-count-partially-walked">0</span></div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-completed)"></span><span class="legend-label">Completed</span><span class="legend-count" id="legend-count-completed">0</span></div>
+      </div>
     </div>
-    <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
-    <div class="status-legend" id="status-legend">
-      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-nh)"></span><span class="legend-label">Not home</span><span class="legend-count" id="legend-count-NH">0</span></div>
-      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-supports)"></span><span class="legend-label">Supports</span><span class="legend-count" id="legend-count-Supports">0</span></div>
-      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-undecided)"></span><span class="legend-label">Undecided</span><span class="legend-count" id="legend-count-Undecided">0</span></div>
-      <div class="legend-row"><span class="legend-swatch" style="background:var(--status-opposed)"></span><span class="legend-label">Opposed</span><span class="legend-count" id="legend-count-Opposed">0</span></div>
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>Address</h2>
+        <input id="search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+      </div>
+      <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
+      <div class="sidebar-footer" id="count-footer">&nbsp;</div>
     </div>
-    <div class="sidebar-footer" id="count-footer">&nbsp;</div>
   </aside>
   <div id="loading-overlay">
     <div class="spinner"></div>
     <div class="loading-text">Loading map data&hellip;</div>
   </div>
-</main>
 
-<!-- ============ EDIT DIALOG ============ -->
-<div id="dialog-overlay">
-  <div id="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
-    <h3 id="dlg-title">Canvassing entry</h3>
-    <div class="field">
-      <label class="field-label" for="dlg-address">Address</label>
-      <input id="dlg-address" type="text" readonly>
-    </div>
-    <div class="field">
-      <span class="field-label">Status</span>
-      <div class="radio-row" id="dlg-status-group">
-        <label><input type="radio" name="dlg-status" value="Not home"> Not home</label>
-        <label><input type="radio" name="dlg-status" value="Supports"> Supports</label>
-        <label><input type="radio" name="dlg-status" value="Undecided"> Undecided</label>
-        <label><input type="radio" name="dlg-status" value="Opposed"> Opposed</label>
+  <!-- ============ PRECINCT PANEL (floating, tracks the selected precinct) ============ -->
+  <div class="precinct-panel" id="precinct-panel" hidden>
+    <h3 id="precinct-panel-title">Precinct</h3>
+
+    <div class="precinct-panel-section">
+      <span class="field-label">Precinct Status</span>
+      <div class="precinct-status-row" id="precinct-status-group">
+        <button type="button" class="precinct-status-btn" data-status="Not Yet Printed"><span class="swatch"></span>Not Yet Printed</button>
+        <button type="button" class="precinct-status-btn" data-status="Printed"><span class="swatch"></span>Printed</button>
+        <button type="button" class="precinct-status-btn" data-status="Partially Walked"><span class="swatch"></span>Partially Walked</button>
+        <button type="button" class="precinct-status-btn" data-status="Completed"><span class="swatch"></span>Completed</button>
+      </div>
+      <div id="precinct-completed-date-field" hidden>
+        <label class="field-label" for="precinct-completed-date">Completed date</label>
+        <input type="date" id="precinct-completed-date">
       </div>
     </div>
-    <div class="field">
-      <span class="field-label">Yard sign / Volunteer</span>
-      <div class="checkbox-row" id="dlg-flags-group">
-        <label><input type="checkbox" id="dlg-yard-sign"> Yard sign</label>
-        <label><input type="checkbox" id="dlg-volunteer"> Volunteer</label>
-      </div>
+
+    <div class="precinct-panel-section">
+      <span class="field-label">Canvass Status</span>
+      <label class="walk-toggle-row">
+        <input type="checkbox" id="precinct-walk-toggle">
+        <span class="swatch"></span>
+        <span>Walked</span>
+      </label>
+      <p class="walk-hint">Swipe over parcels to mark walked.</p>
     </div>
-    <div class="field">
-      <label class="field-label" for="dlg-note">Note</label>
-      <textarea id="dlg-note" placeholder="Notes from this visit&hellip;"></textarea>
-    </div>
-    <div id="dlg-meta"></div>
+
+    <div id="precinct-meta"></div>
     <div class="dialog-actions">
-      <button class="btn" id="dlg-cancel" type="button">Cancel</button>
-      <button class="btn primary" id="dlg-save" type="button">Save</button>
+      <button class="btn" id="precinct-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="precinct-save" type="button">Save</button>
     </div>
   </div>
-</div>
+</main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
@@ -631,7 +610,10 @@
     APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbw7SiYOrUjcMo6oCpOd7F-R7UiMDJ62rFC-WHV7E2h1lkAd9iupGtkA_oARazYAFyXuCw/exec",
     CITY_BOUNDARY_URL: "data/city_boundary.geojson",
     PARCELS_URL: "data/parcels.geojson",
+    PRECINCTS_URL: "data/precincts.geojson",
     SITEADD_FIELD: "SITEADD",
+    PRECINCT_ID_FIELD: "id",
+    PARCEL_PRECINCT_FIELD: "PRECINCT_ID",
     MAP_CENTER: [36.9791, -122.0330],
     MAP_ZOOM: 14,
     NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
@@ -647,37 +629,59 @@
   function getNeighborhoodZoom() { return isPhoneSize() ? CONFIG.NEIGHBORHOOD_ZOOM_PHONE : CONFIG.NEIGHBORHOOD_ZOOM_DESKTOP; }
 
   var DEMO_MODE = !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0;
-  var demoEntries = {};   // address(lowercased) -> {status, note, updatedAt, updatedBy}   (demo mode only)
   var demoUsers = {};     // username(lowercased) -> {password, displayName}                 (demo mode only)
 
   // ================== STATE ==================
-  var map, boundaryLayer, parcelsLayer, addressMarker;
+  var map, boundaryLayer, parcelsLayer, precinctsLayer;
   var parcelsVisible = false;      // parcels layer is withheld until zoomed in enough (see updateVisibleParcels)
   var parcelsMinZoom = null;       // computed once the initial city-wide view is set
-  // address(lowercased) -> { addressExact, layers: [L.Layer,...], features: [...] }
+  // address(lowercased) -> { addressExact, precinctId, layers: [L.Layer,...], features: [...] }
   // (grouped because a small number of addresses cover more than one parcel,
   // e.g. adjacent lots recorded under the same site address)
   var parcelIndex = {};
-  var statusData = {};         // address(lowercased) -> { status, note, yardSign, volunteer, updatedAt, updatedBy }
-  var lastSyncAt = null;       // server timestamp of the last successful full/partial data fetch
-  var SYNC_POLL_MS = 60000;    // how often to check the Sheet for other canvassers' updates
+  // precinctId(string) -> { feature, layer, parcelKeys: [address keys...] }
+  var precinctIndex = {};
+  var precinctStatusData = {};   // precinctId -> { status, completedDate, updatedAt, updatedBy }
+  var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
+  var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
+  var SYNC_POLL_MS = 60000;      // how often to check the Sheet for other canvassers' updates
   var selectedAddressKey = null;
+  var selectedPrecinctId = null;
   var currentUser = null;      // { username, displayName }
   var locateWatchId = null;
   var locationMarker = null, accuracyCircle = null;
 
+  // ---- precinct panel state ----
+  var openPrecinctId = null;      // precinct whose floating panel is currently open
+  var pendingStatus = null;       // unsaved precinct-status selection while the panel is open
+  var pendingCompletedDate = "";  // unsaved "Completed" date while the panel is open
+  var pendingWalked = {};         // address(lowercased) -> boolean -- unsaved swipe toggles this session
+  var walkArmed = false;          // true while the Walked checkbox is on (swipe-to-paint active)
+  var swiping = false;
+  var swipeTouchedThisStroke = {};
+
   // Pulled from the CSS custom properties in :root, so a color only ever
   // has to change in one place (the stylesheet) and the map fill, list
-  // dots, legend swatches, and dialog radio buttons all stay in sync.
+  // dots, legend swatches, and panel buttons all stay in sync.
   function cssVar(name, fallback) {
     var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return v || fallback;
   }
-  var STATUS_COLOR_HEX = {
-    "Not home": cssVar("--status-nh", "#3B82F6"),
-    "Supports": cssVar("--status-supports", "#3FAE62"),
-    "Undecided": cssVar("--status-undecided", "#E0B23F"),
-    "Opposed": cssVar("--status-opposed", "#D1493F")
+  var WALKED_COLOR_HEX = cssVar("--walked-color", "#14181D");
+  var PARCEL_FILL_HEX = cssVar("--parcel-fill", "#4A6577");
+  var PRECINCT_STATUSES = ["Not Yet Printed", "Printed", "Partially Walked", "Completed"];
+  var DEFAULT_PRECINCT_STATUS = "Not Yet Printed";
+  var PRECINCT_STATUS_COLOR_HEX = {
+    "Not Yet Printed": cssVar("--precinct-not-printed", "#D1493F"),
+    "Printed": cssVar("--precinct-printed", "#E0B23F"),
+    "Partially Walked": cssVar("--precinct-partially-walked", "#3FAE62"),
+    "Completed": cssVar("--precinct-completed", "#8E5FD1")
+  };
+  var PRECINCT_LEGEND_ID = {
+    "Not Yet Printed": "not-printed",
+    "Printed": "printed",
+    "Partially Walked": "partially-walked",
+    "Completed": "completed"
   };
 
   // ================== UTIL ==================
@@ -688,6 +692,7 @@
     });
   }
   function keyFor(addr) { return String(addr || "").trim().toLowerCase(); }
+  function cssEscape(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"); }
 
   async function sha256Hex(text) {
     var enc = new TextEncoder().encode(text);
@@ -798,8 +803,8 @@
     // minZoom/zoomSnap/zoomDelta match the Voter Precinct Map webpage's map
     // init (finer zoom steps, and a floor so you can't zoom out past the
     // whole city). maxZoom stays 20 here (the precinct page used 19) since
-    // that's what the "zoom in on selection" feature you asked for earlier
-    // relies on for the desktop neighborhood zoom.
+    // that's what the "zoom in on selection" feature relies on for the
+    // desktop neighborhood zoom.
     map = L.map("map", { zoomControl: true, preferCanvas: true, minZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
 
     var streetsLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -847,30 +852,41 @@
     map.on("click", function () { deselectParcel(); });
     map.on("zoomend", updateVisibleParcels);
     map.on("moveend", updateVisibleParcels);
+    setupSwipeToWalk();
 
     Promise.all([
       fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
       fetch(CONFIG.PARCELS_URL).then(function (r) { return r.json(); }),
-      DEMO_MODE ? Promise.resolve({ ok: true, entries: [], serverTime: new Date().toISOString() }) : apiGet("all", {}).catch(function () { return { ok: true, entries: [], serverTime: new Date().toISOString() }; })
+      fetch(CONFIG.PRECINCTS_URL).then(function (r) { return r.json(); }),
+      DEMO_MODE
+        ? Promise.resolve({ ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() })
+        : apiGet("all", {}).catch(function () { return { ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() }; })
     ]).then(function (results) {
       var boundaryGeoJson = results[0];
       var parcelsGeoJson = results[1];
-      var entriesRes = results[2];
+      var precinctsGeoJson = results[2];
+      var stateRes = results[3];
 
-      if (entriesRes && entriesRes.ok && Array.isArray(entriesRes.entries)) {
-        entriesRes.entries.forEach(function (e) {
-          statusData[keyFor(e.address)] = { status: e.status, note: e.note, yardSign: e.yardSign, volunteer: e.volunteer, updatedAt: e.updatedAt, updatedBy: e.updatedBy };
+      if (stateRes && stateRes.ok) {
+        (stateRes.precincts || []).forEach(function (p) {
+          precinctStatusData[String(p.precinctId)] = { status: p.status, completedDate: p.completedDate, updatedAt: p.updatedAt, updatedBy: p.updatedBy };
+        });
+        (stateRes.parcels || []).forEach(function (pc) {
+          parcelWalkedData[keyFor(pc.address)] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
         });
       }
-      lastSyncAt = (entriesRes && entriesRes.serverTime) || new Date().toISOString();
+      lastSyncAt = (stateRes && stateRes.serverTime) || new Date().toISOString();
 
       addBoundaryDimming(boundaryGeoJson);
+      addPrecincts(precinctsGeoJson);
       addParcels(parcelsGeoJson);
+      buildPrecinctList();
       try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
 
       // Parcels stay hidden until the viewer has zoomed in noticeably closer
       // than this initial city-wide view -- 11k+ parcel outlines at a
       // city-wide zoom is just clutter, and it's a lot to draw at once.
+      // Precincts (far fewer, much larger shapes) stay visible at every zoom.
       parcelsMinZoom = map.getZoom() + CONFIG.PARCELS_MIN_ZOOM_DELTA;
       updateVisibleParcels();
 
@@ -886,25 +902,39 @@
     });
   }
 
-  // Pulls only the Data rows updated since our last check and patches them
-  // into statusData -- keeps everyone's map/list/legend in sync with what
+  // Pulls only the precinct/parcel rows updated since our last check and
+  // patches them in -- keeps everyone's map/lists/legend in sync with what
   // other canvassers are recording, without re-fetching the whole dataset.
   function pollForUpdates() {
     apiGet("since", { since: lastSyncAt }).then(function (res) {
-      if (!res || !res.ok || !Array.isArray(res.entries)) return;
+      if (!res || !res.ok) return;
       var anySkipped = false;
-      if (res.entries.length) {
-        res.entries.forEach(function (e) {
-          var key = keyFor(e.address);
-          // If this address's dialog is open right now, leave it alone --
-          // don't overwrite what the user is actively looking at/editing.
-          // Also hold back the sync watermark so this entry gets picked up
-          // again on a later poll once the dialog is closed, instead of
-          // being silently skipped forever.
-          if (dialogEntry && key === keyFor(dialogEntry.addressExact)) { anySkipped = true; return; }
-          statusData[key] = { status: e.status, note: e.note, yardSign: e.yardSign, volunteer: e.volunteer, updatedAt: e.updatedAt, updatedBy: e.updatedBy };
-          restyleEntry(key);
-        });
+      var touchedAny = false;
+
+      (res.precincts || []).forEach(function (p) {
+        var id = String(p.precinctId);
+        // If this precinct's panel is open right now, leave it alone --
+        // don't overwrite what the user is actively looking at/editing.
+        // Also hold back the sync watermark so it's retried on a later poll
+        // once the panel is closed, instead of being skipped forever.
+        if (openPrecinctId === id) { anySkipped = true; return; }
+        precinctStatusData[id] = { status: p.status, completedDate: p.completedDate, updatedAt: p.updatedAt, updatedBy: p.updatedBy };
+        restylePrecinct(id);
+        touchedAny = true;
+      });
+
+      (res.parcels || []).forEach(function (pc) {
+        var key = keyFor(pc.address);
+        var belongsToOpenPrecinct = openPrecinctId && precinctIndex[openPrecinctId] &&
+          precinctIndex[openPrecinctId].parcelKeys.indexOf(key) !== -1;
+        if (belongsToOpenPrecinct) { anySkipped = true; return; }
+        parcelWalkedData[key] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
+        restyleEntry(key);
+        touchedAny = true;
+      });
+
+      if (touchedAny) {
+        buildPrecinctList();
         buildAddressList($("search-input").value);
       }
       if (res.serverTime && !anySkipped) lastSyncAt = res.serverTime;
@@ -1087,10 +1117,17 @@
     return feature && feature.properties ? feature.properties[CONFIG.SITEADD_FIELD] : null;
   }
 
+  // ================== WALKED STATE HELPERS ==================
+  // "Committed" = what's saved on the server (or, in demo mode, saved
+  // locally); "current" = committed, overridden by any not-yet-saved swipe
+  // toggle made during this precinct panel session.
+  function committedWalked(key) { return !!(parcelWalkedData[key] && parcelWalkedData[key].walked); }
+  function currentWalked(key) { return pendingWalked.hasOwnProperty(key) ? pendingWalked[key] : committedWalked(key); }
+
+  // ================== PARCEL STYLING ==================
   function styleForKey(key) {
-    var entry = statusData[key];
     var isSelected = key && key === selectedAddressKey;
-    var status = entry && entry.status;
+    var walked = currentWalked(key);
     return {
       // Outlines are skipped entirely except on the selected parcel --
       // stroking 10k+ paths is the expensive part of drawing this layer on
@@ -1100,8 +1137,8 @@
       color: "#1257FF",
       weight: isSelected ? 3 : 0,
       opacity: 1,
-      fillColor: status ? STATUS_COLOR_HEX[status] : "#4A6577",
-      fillOpacity: status ? 0.55 : (isSelected ? 0.3 : 0.12)
+      fillColor: walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX,
+      fillOpacity: walked ? 0.6 : (isSelected ? 0.3 : 0.12)
     };
   }
 
@@ -1111,10 +1148,9 @@
   }
 
   // Restyle just the handful of layers belonging to one address, instead of
-  // walking the whole 11k+-feature dataset. Selecting/deselecting only ever
-  // changes the look of (at most) two addresses, so there's no reason to
-  // touch the rest -- doing so was the main source of the lag reported on
-  // iPhone between tapping an address and seeing it highlight.
+  // walking the whole 11k+-feature dataset. Selecting/deselecting or
+  // toggling "walked" only ever changes the look of a small number of
+  // addresses, so there's no reason to touch the rest.
   function restyleEntry(key) {
     var entry = parcelIndex[key];
     if (!entry) return;
@@ -1129,13 +1165,18 @@
         var addr = getAddr(feature);
         if (!addr) return;
         var key = keyFor(addr);
+        var precinctId = feature.properties ? String(feature.properties[CONFIG.PARCEL_PRECINCT_FIELD] || "") : "";
         if (!parcelIndex[key]) {
           var numMatch = addr.match(/^(\d+[A-Za-z]?)/);
-          parcelIndex[key] = { addressExact: addr, layers: [], features: [], numberText: numMatch ? numMatch[1] : "", labelMarker: null };
+          parcelIndex[key] = { addressExact: addr, precinctId: precinctId, layers: [], features: [], numberText: numMatch ? numMatch[1] : "", labelMarker: null };
+          if (precinctId && precinctIndex[precinctId] && precinctIndex[precinctId].parcelKeys.indexOf(key) === -1) {
+            precinctIndex[precinctId].parcelKeys.push(key);
+          }
         }
         parcelIndex[key].layers.push(layer);
         parcelIndex[key].features.push(feature);
         layer.on("click", function (e) {
+          if (walkArmed) return; // swipe-to-walk mode owns clicks on the map while armed
           L.DomEvent.stopPropagation(e);
           selectParcel(key);
         });
@@ -1147,7 +1188,129 @@
     buildAddressList();
   }
 
-  // ================== ADDRESS LIST ==================
+  // ================== PRECINCTS ==================
+  function precinctStatusFor(id) {
+    var entry = precinctStatusData[id];
+    return (entry && entry.status) || DEFAULT_PRECINCT_STATUS;
+  }
+
+  function precinctStyle(feature) {
+    var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
+    var isSelected = id === selectedPrecinctId;
+    var status = precinctStatusFor(id);
+    return {
+      stroke: true,
+      color: isSelected ? "#111318" : "#FFFFFF",
+      weight: isSelected ? 3 : 1,
+      opacity: isSelected ? 1 : 0.65,
+      fillColor: PRECINCT_STATUS_COLOR_HEX[status],
+      fillOpacity: isSelected ? 0.3 : 0.22
+    };
+  }
+
+  function restylePrecinct(id) {
+    var p = precinctIndex[id];
+    if (p && p.layer) p.layer.setStyle(precinctStyle(p.feature));
+  }
+
+  function addPrecincts(precinctsGeoJson) {
+    precinctsLayer = L.geoJSON(precinctsGeoJson, {
+      style: precinctStyle,
+      onEachFeature: function (feature, layer) {
+        var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
+        precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [] };
+        layer.on("click", function (e) {
+          L.DomEvent.stopPropagation(e);
+          selectPrecinct(id);
+        });
+      }
+    }).addTo(map);
+    // Precincts are large, few in number, and meant to be visible at every
+    // zoom level (unlike the individual parcels), so they're added directly
+    // rather than going through the viewport-windowed visibility logic.
+  }
+
+  function selectPrecinct(id) {
+    var previous = selectedPrecinctId;
+    selectedPrecinctId = id;
+    if (previous && previous !== id) restylePrecinct(previous);
+    restylePrecinct(id);
+    highlightPrecinctListItem(id);
+    zoomToFitPrecinct(id);
+    openPrecinctPanel(id);
+  }
+
+  function zoomToFitPrecinct(id) {
+    var p = precinctIndex[id];
+    if (!p) return;
+    try {
+      map.flyToBounds(p.layer.getBounds(), { padding: [40, 40], duration: 0.5, maxZoom: 19 });
+    } catch (e) { /* ignore */ }
+  }
+
+  // ================== PRECINCT LIST ==================
+  function buildPrecinctList() {
+    var listEl = $("precinct-list");
+    var ids = Object.keys(precinctIndex).sort(function (a, b) { return Number(a) - Number(b); });
+    if (!ids.length) {
+      listEl.innerHTML = '<li class="empty-msg">Loading precincts&hellip;</li>';
+    } else {
+      var html = new Array(ids.length);
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        html[i] = precinctRowHtml(id);
+      }
+      listEl.innerHTML = html.join("");
+    }
+    renderPrecinctLegend();
+  }
+
+  function precinctRowHtml(id) {
+    var status = precinctStatusFor(id);
+    var color = PRECINCT_STATUS_COLOR_HEX[status];
+    var keys = precinctIndex[id].parcelKeys;
+    var walkedCount = keys.filter(currentWalked).length;
+    return '<li data-precinct-id="' + escapeHtml(id) + '"' + (id === selectedPrecinctId ? ' class="active"' : "") + '>' +
+      '<span class="status-dot" style="background:' + color + '"></span>' +
+      '<span class="precinct-id">' + escapeHtml(id) + "</span>" +
+      '<span class="precinct-progress">' + walkedCount + "/" + keys.length + " walked</span></li>";
+  }
+
+  // Cheap partial update for the one row that changed, instead of rebuilding
+  // the whole list on every single swipe touch.
+  function updatePrecinctListRow(id) {
+    var li = document.querySelector('#precinct-list li[data-precinct-id="' + cssEscape(id) + '"]');
+    if (!li) return;
+    var keys = precinctIndex[id].parcelKeys;
+    var walkedCount = keys.filter(currentWalked).length;
+    var progressEl = li.querySelector(".precinct-progress");
+    if (progressEl) progressEl.textContent = walkedCount + "/" + keys.length + " walked";
+  }
+
+  function highlightPrecinctListItem(id) {
+    document.querySelectorAll("#precinct-list li").forEach(function (li) {
+      li.classList.toggle("active", id && li.dataset.precinctId === id);
+    });
+  }
+
+  function renderPrecinctLegend() {
+    var counts = { "Not Yet Printed": 0, "Printed": 0, "Partially Walked": 0, "Completed": 0 };
+    Object.keys(precinctIndex).forEach(function (id) {
+      var status = precinctStatusFor(id);
+      if (counts.hasOwnProperty(status)) counts[status]++;
+    });
+    Object.keys(counts).forEach(function (status) {
+      var el = $("legend-count-" + PRECINCT_LEGEND_ID[status]);
+      if (el) el.textContent = counts[status];
+    });
+  }
+
+  $("precinct-list").addEventListener("click", function (e) {
+    var li = e.target.closest("li[data-precinct-id]");
+    if (li) selectPrecinct(li.dataset.precinctId);
+  });
+
+  // ================== ADDRESS LIST (navigation only -- find & zoom to a house) ==================
   function buildAddressList(filterText) {
     var listEl = $("address-list");
     var keys = Object.keys(parcelIndex);
@@ -1167,8 +1330,7 @@
       for (var i = 0; i < addresses.length; i++) {
         var addr = addresses[i];
         var key = keyFor(addr);
-        var entry = statusData[key];
-        var dotColor = entry && entry.status ? STATUS_COLOR_HEX[entry.status] : "transparent";
+        var dotColor = currentWalked(key) ? WALKED_COLOR_HEX : "transparent";
         html[i] = '<li data-key="' + escapeHtml(key) + '"' + (key === selectedAddressKey ? ' class="active"' : "") + '>' +
           '<span class="status-dot" style="background:' + dotColor + '"></span>' +
           "<span>" + escapeHtml(addr) + "</span></li>";
@@ -1176,24 +1338,6 @@
       listEl.innerHTML = html.join("");
     }
     $("count-footer").textContent = keys.length + " address" + (keys.length === 1 ? "" : "es") + (q ? " \u2022 " + addresses.length + " match" + (addresses.length === 1 ? "" : "es") : "");
-    renderLegend();
-  }
-
-  // Counts every canvassed address by status, regardless of the current
-  // search filter, and updates the legend panel. Called whenever the list
-  // is rebuilt (initial load and after every save), so it stays live.
-  function renderLegend() {
-    var counts = { "Not home": 0, "Supports": 0, "Undecided": 0, "Opposed": 0 };
-    // DOM ids stay short/stable even though "Not home" has a space in it.
-    var legendIds = { "Not home": "NH", "Supports": "Supports", "Undecided": "Undecided", "Opposed": "Opposed" };
-    Object.keys(parcelIndex).forEach(function (key) {
-      var entry = statusData[key];
-      if (entry && entry.status && counts.hasOwnProperty(entry.status)) counts[entry.status]++;
-    });
-    Object.keys(counts).forEach(function (status) {
-      var el = $("legend-count-" + legendIds[status]);
-      if (el) el.textContent = counts[status];
-    });
   }
 
   // Event delegation: one listener for the whole list instead of one per
@@ -1207,7 +1351,7 @@
     buildAddressList(this.value);
   });
 
-  // ================== SELECTION ==================
+  // ================== ADDRESS SELECTION (find & zoom, no dialog) ==================
   function selectParcel(key, opts) {
     opts = opts || {};
     var entry = parcelIndex[key];
@@ -1216,11 +1360,9 @@
     var previousKey = selectedAddressKey;
     selectedAddressKey = key;
 
-    // Cheap, purely-DOM feedback first: the list highlight and the address
-    // button must appear the instant the user taps, not after any map or
-    // style work. Everything below this point is allowed to take longer.
+    // Cheap, purely-DOM feedback first: the list highlight must appear the
+    // instant the user taps, not after any map or style work.
     highlightListItem(key);
-    showAddressButton(entry);
 
     if (!opts.fromList) {
       // Selection triggered by clicking the map shape itself: make sure the
@@ -1250,13 +1392,10 @@
     return group.getBounds();
   }
 
-  function cssEscape(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"); }
-
   function deselectParcel() {
     var previousKey = selectedAddressKey;
     selectedAddressKey = null;
     highlightListItem(null);
-    removeAddressButton();
     if (previousKey) restyleEntry(previousKey);
   }
 
@@ -1266,134 +1405,165 @@
     });
   }
 
-  function removeAddressButton() {
-    if (addressMarker) { map.removeLayer(addressMarker); addressMarker = null; }
+  // ================== PRECINCT PANEL ==================
+  function openPrecinctPanel(id) {
+    if (openPrecinctId && openPrecinctId !== id) closePrecinctPanel(true);
+    openPrecinctId = id;
+    pendingWalked = {};
+    walkArmed = false;
+    $("precinct-walk-toggle").checked = false;
+    setWalkArmed(false);
+
+    var existing = precinctStatusData[id];
+    pendingStatus = (existing && existing.status) || DEFAULT_PRECINCT_STATUS;
+    pendingCompletedDate = (existing && existing.completedDate) || "";
+    $("precinct-completed-date").value = pendingCompletedDate;
+    $("precinct-meta").textContent = existing && existing.updatedAt ? lastUpdatedText(existing) : "";
+
+    $("precinct-panel-title").textContent = "Precinct " + id;
+    updatePrecinctStatusButtons();
+    $("precinct-panel").hidden = false;
+    positionPrecinctPanel(id);
+    map.on("moveend zoomend", repositionOpenPanel);
   }
 
-  function showAddressButton(entry) {
-    removeAddressButton();
-    var latlng;
-    try {
-      var b = groupBounds(entry);
-      latlng = b.getCenter();
-      entry.layers.forEach(function (l) { if (l.bringToFront) l.bringToFront(); });
-    } catch (e) { return; }
+  function lastUpdatedText(entry) {
+    var when = new Date(entry.updatedAt);
+    var whenText = isNaN(when.getTime()) ? entry.updatedAt : when.toLocaleString();
+    return "Last updated " + whenText + (entry.updatedBy ? " by " + entry.updatedBy : "");
+  }
 
-    var icon = L.divIcon({
-      className: "address-marker",
-      html: '<button type="button" class="address-btn">' + escapeHtml(entry.addressExact) + "</button>",
-      iconSize: null,
-      iconAnchor: [0, 0]
+  function repositionOpenPanel() {
+    if (openPrecinctId) positionPrecinctPanel(openPrecinctId);
+  }
+
+  // Preferred: to the left of the precinct's on-screen shape. Secondary:
+  // above it. Falls back to clamping within the viewport if neither fits.
+  function positionPrecinctPanel(id) {
+    var panel = $("precinct-panel");
+    var p = precinctIndex[id];
+    if (!p) return;
+    var mapEl = $("map");
+    var mapRect = mapEl.getBoundingClientRect();
+    var bounds = p.layer.getBounds();
+    var nw = map.latLngToContainerPoint(bounds.getNorthWest());
+    var se = map.latLngToContainerPoint(bounds.getSouthEast());
+    var box = {
+      left: mapRect.left + Math.min(nw.x, se.x),
+      right: mapRect.left + Math.max(nw.x, se.x),
+      top: mapRect.top + Math.min(nw.y, se.y),
+      bottom: mapRect.top + Math.max(nw.y, se.y)
+    };
+
+    var pw = panel.offsetWidth || 300;
+    var ph = panel.offsetHeight || 320;
+    var gap = 14;
+    var minX = 8, minY = 8;
+    var maxX = window.innerWidth - pw - 8;
+    var maxY = window.innerHeight - ph - 8;
+
+    var left = { x: box.left - gap - pw, y: (box.top + box.bottom) / 2 - ph / 2 };
+    var above = { x: (box.left + box.right) / 2 - pw / 2, y: box.top - gap - ph };
+
+    var pick = (left.x >= minX) ? left : (above.y >= minY ? above : left);
+
+    panel.style.left = Math.max(minX, Math.min(pick.x, maxX)) + "px";
+    panel.style.top = Math.max(minY, Math.min(pick.y, maxY)) + "px";
+  }
+
+  function closePrecinctPanel(discard) {
+    if (!openPrecinctId) return;
+    var id = openPrecinctId;
+    if (discard && Object.keys(pendingWalked).length) {
+      var keys = Object.keys(pendingWalked);
+      pendingWalked = {};
+      keys.forEach(restyleEntry);
+      updatePrecinctListRow(id);
+      buildAddressList($("search-input").value);
+    }
+    openPrecinctId = null;
+    pendingWalked = {};
+    walkArmed = false;
+    setWalkArmed(false);
+    map.off("moveend zoomend", repositionOpenPanel);
+    $("precinct-panel").hidden = true;
+    selectedPrecinctId = null;
+    highlightPrecinctListItem(null);
+    restylePrecinct(id);
+  }
+
+  function updatePrecinctStatusButtons() {
+    document.querySelectorAll(".precinct-status-btn").forEach(function (btn) {
+      btn.classList.toggle("active", btn.dataset.status === pendingStatus);
     });
-    addressMarker = L.marker(latlng, { icon: icon, zIndexOffset: 1000, interactive: true }).addTo(map);
-    var el = addressMarker.getElement();
-    if (el) {
-      var btn = el.querySelector(".address-btn");
-      btn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        openDialog(entry);
-      });
-    }
+    $("precinct-completed-date-field").hidden = pendingStatus !== "Completed";
   }
 
-  // ================== EDIT DIALOG ==================
-  var dialogEntry = null;
-
-  async function openDialog(entry) {
-    dialogEntry = entry;
-    $("dlg-address").value = entry.addressExact;
-    $("dlg-note").value = "";
-    $("dlg-meta").textContent = "";
-    document.querySelectorAll('#dlg-status-group input[type="radio"]').forEach(function (r) { r.checked = false; });
-    $("dlg-yard-sign").checked = false;
-    $("dlg-volunteer").checked = false;
-
-    $("dialog-overlay").classList.add("show");
-    $("dlg-save").disabled = true;
-    $("dlg-save").textContent = "Loading\u2026";
-
-    var key = keyFor(entry.addressExact);
-    try {
-      var existing = statusData[key];
-      if (!DEMO_MODE) {
-        var res = await apiGet("entry", { address: entry.addressExact });
-        if (res && res.ok && res.entry) existing = res.entry;
-      } else if (demoEntries[key]) {
-        existing = demoEntries[key];
+  document.querySelectorAll(".precinct-status-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      pendingStatus = btn.dataset.status;
+      updatePrecinctStatusButtons();
+      // "Clicking any of the precinct buttons turns off the parcel radio btn."
+      if (walkArmed) {
+        $("precinct-walk-toggle").checked = false;
+        walkArmed = false;
+        setWalkArmed(false);
       }
-      populateDialog(existing);
-    } catch (e) {
-      $("dlg-meta").textContent = "Could not load existing data for this address.";
-    } finally {
-      $("dlg-save").disabled = false;
-      $("dlg-save").textContent = "Save";
-    }
-  }
-
-  function populateDialog(existing) {
-    if (!existing) return;
-    if (existing.status) {
-      var radio = document.querySelector('#dlg-status-group input[value="' + existing.status + '"]');
-      if (radio) radio.checked = true;
-    }
-    if (existing.note) $("dlg-note").value = existing.note;
-    $("dlg-yard-sign").checked = !!existing.yardSign;
-    $("dlg-volunteer").checked = !!existing.volunteer;
-    if (existing.updatedAt) {
-      var when = new Date(existing.updatedAt);
-      var whenText = isNaN(when.getTime()) ? existing.updatedAt : when.toLocaleString();
-      $("dlg-meta").textContent = "Last updated " + whenText + (existing.updatedBy ? " by " + existing.updatedBy : "");
-    }
-  }
-
-  function closeDialog() {
-    $("dialog-overlay").classList.remove("show");
-    dialogEntry = null;
-  }
-
-  $("dlg-cancel").addEventListener("click", closeDialog);
-  $("dialog-overlay").addEventListener("click", function (e) {
-    if (e.target === $("dialog-overlay")) closeDialog();
+    });
   });
 
-  $("dlg-save").addEventListener("click", async function () {
-    if (!dialogEntry) return;
-    var statusEl = document.querySelector('#dlg-status-group input[type="radio"]:checked');
-    var status = statusEl ? statusEl.value : "";
-    var note = $("dlg-note").value;
-    var yardSign = $("dlg-yard-sign").checked;
-    var volunteer = $("dlg-volunteer").checked;
-    var addr = dialogEntry.addressExact;
-    var key = keyFor(addr);
+  $("precinct-walk-toggle").addEventListener("change", function () {
+    walkArmed = this.checked;
+    setWalkArmed(walkArmed);
+  });
 
-    if (!status) { $("dlg-meta").textContent = "Choose a status before saving."; return; }
+  function setWalkArmed(armed) {
+    $("map").classList.toggle("walk-armed", armed);
+    if (armed) map.dragging.disable(); else map.dragging.enable();
+  }
 
-    var saveBtn = $("dlg-save");
+  $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true); });
+
+  $("precinct-save").addEventListener("click", async function () {
+    if (!openPrecinctId) return;
+    var id = openPrecinctId;
+    var status = pendingStatus;
+    var completedDate = status === "Completed" ? $("precinct-completed-date").value : "";
+    var walkedChanges = Object.keys(pendingWalked).map(function (key) {
+      return { key: key, address: parcelIndex[key].addressExact, walked: pendingWalked[key] };
+    });
+
+    var saveBtn = this;
     saveBtn.disabled = true;
     saveBtn.textContent = "Saving\u2026";
     try {
       var nowIso = new Date().toISOString();
       if (DEMO_MODE) {
-        demoEntries[key] = { status: status, note: note, yardSign: yardSign, volunteer: volunteer, updatedAt: nowIso, updatedBy: currentUser.displayName };
-        statusData[key] = demoEntries[key];
+        precinctStatusData[id] = { status: status, completedDate: completedDate, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        walkedChanges.forEach(function (c) {
+          parcelWalkedData[c.key] = { walked: c.walked, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        });
       } else {
         var res = await apiPost({
-          action: "save",
-          address: addr,
+          action: "saveState",
+          precinctId: id,
           status: status,
-          note: note,
-          yardSign: yardSign,
-          volunteer: volunteer,
+          completedDate: completedDate,
+          walked: walkedChanges.map(function (c) { return { address: c.address, walked: c.walked }; }),
           username: currentUser.username
         });
         if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
-        statusData[key] = { status: status, note: note, yardSign: yardSign, volunteer: volunteer, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        precinctStatusData[id] = { status: status, completedDate: completedDate, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        walkedChanges.forEach(function (c) {
+          parcelWalkedData[c.key] = { walked: c.walked, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        });
       }
-      restyleEntry(key);
+      pendingWalked = {};
+      closePrecinctPanel(false);
+      buildPrecinctList();
       buildAddressList($("search-input").value);
-      closeDialog();
     } catch (e) {
-      $("dlg-meta").textContent = "Could not save: " + (e.message || e);
+      $("precinct-meta").textContent = "Could not save: " + (e.message || e);
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = "Save";
@@ -1401,8 +1571,64 @@
   });
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && $("dialog-overlay").classList.contains("show")) closeDialog();
+    if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true);
   });
+
+  // ================== SWIPE TO MARK WALKED ==================
+  // Only active while a precinct's panel is open AND its "Walked" checkbox
+  // is on. Scoped to that precinct's own parcels (not the whole map), and
+  // toggles each parcel at most once per continuous swipe stroke.
+  function setupSwipeToWalk() {
+    var mapEl = $("map");
+
+    mapEl.addEventListener("pointerdown", function (e) {
+      if (!walkArmed || !openPrecinctId) return;
+      swiping = true;
+      swipeTouchedThisStroke = {};
+      paintAtPoint(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    mapEl.addEventListener("pointermove", function (e) {
+      if (!swiping) return;
+      paintAtPoint(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    window.addEventListener("pointerup", function () { swiping = false; });
+    window.addEventListener("pointercancel", function () { swiping = false; });
+  }
+
+  function paintAtPoint(clientX, clientY) {
+    var p = precinctIndex[openPrecinctId];
+    if (!p) return;
+    var mapRect = $("map").getBoundingClientRect();
+    var containerPoint = L.point(clientX - mapRect.left, clientY - mapRect.top);
+    var latlng = map.containerPointToLatLng(containerPoint);
+    var pt = turf.point([latlng.lng, latlng.lat]);
+
+    for (var i = 0; i < p.parcelKeys.length; i++) {
+      var key = p.parcelKeys[i];
+      if (swipeTouchedThisStroke[key]) continue;
+      var entry = parcelIndex[key];
+      if (!entry) continue;
+      var hit = entry.features.some(function (f) { return turf.booleanPointInPolygon(pt, f); });
+      if (hit) {
+        swipeTouchedThisStroke[key] = true;
+        toggleWalkedPending(key);
+        break; // a point can only be inside one parcel
+      }
+    }
+  }
+
+  function toggleWalkedPending(key) {
+    var next = !currentWalked(key);
+    if (next === committedWalked(key)) {
+      delete pendingWalked[key]; // swiped back to its already-saved state -- nothing pending
+    } else {
+      pendingWalked[key] = next;
+    }
+    restyleEntry(key);
+    updatePrecinctListRow(openPrecinctId);
+  }
 
   // ================== BOOT ==================
   initLoginNote();
