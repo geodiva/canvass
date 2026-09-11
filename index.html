@@ -551,6 +551,28 @@
     background: none;
     cursor: pointer;
   }
+  .settings-slider-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--ink);
+    padding: 8px 0 5px;
+  }
+  .settings-slider-row input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0 8px;
+    accent-color: var(--precinct-selected-border, #0047AB);
+  }
+  .settings-slider-row .settings-slider-value {
+    flex: 0 0 auto;
+    width: 3.2em;
+    text-align: right;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
   #settings-status { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
 
   /* ---------- login screen ---------- */
@@ -754,6 +776,11 @@
       <div class="settings-color-row"><span>Printed</span><input type="color" id="settings-color-printed"></div>
       <div class="settings-color-row"><span>Partially Walked</span><input type="color" id="settings-color-partially-walked"></div>
       <div class="settings-color-row"><span>Completed</span><input type="color" id="settings-color-completed"></div>
+      <div class="settings-slider-row">
+        <span>Fill transparency</span>
+        <input type="range" id="settings-precinct-fill-opacity" min="0" max="1" step="0.01">
+        <span class="settings-slider-value" id="settings-precinct-fill-opacity-value">22%</span>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -859,6 +886,7 @@
   // every canvasser (see Code.gs's Settings sheet / saveSettings action).
   var DEFAULT_SETTINGS = {
     basemap: "Streets",
+    precinctFillOpacity: 0.22,   // how solid the precinct status fill looks on the map (0 = fully see-through, 1 = fully opaque)
     colors: {
       notYetPrinted: "#D1493F",
       printed: "#E0B23F",
@@ -878,6 +906,9 @@
   function mergeSettings(base, override) {
     var merged = cloneSettings(base);
     if (override && override.basemap) merged.basemap = override.basemap;
+    if (override && typeof override.precinctFillOpacity === "number" && !isNaN(override.precinctFillOpacity)) {
+      merged.precinctFillOpacity = Math.max(0, Math.min(1, override.precinctFillOpacity));
+    }
     if (override && override.colors) {
       Object.keys(merged.colors).forEach(function (k) {
         if (override.colors[k]) merged.colors[k] = override.colors[k];
@@ -897,6 +928,7 @@
   var PARCEL_FILL_HEX = DEFAULT_SETTINGS.colors.notWalkedParcel;
   var SELECTED_BORDER_HEX = DEFAULT_SETTINGS.colors.selectedBorder;
   var UNSELECTED_OUTLINE_HEX = DEFAULT_SETTINGS.colors.unselectedOutline;
+  var PRECINCT_FILL_OPACITY = DEFAULT_SETTINGS.precinctFillOpacity;
   var PRECINCT_STATUS_COLOR_HEX = {
     "Not Yet Printed": DEFAULT_SETTINGS.colors.notYetPrinted,
     "Printed": DEFAULT_SETTINGS.colors.printed,
@@ -927,6 +959,7 @@
     PARCEL_FILL_HEX = c.notWalkedParcel;
     SELECTED_BORDER_HEX = c.selectedBorder;
     UNSELECTED_OUTLINE_HEX = c.unselectedOutline;
+    PRECINCT_FILL_OPACITY = (typeof settings.precinctFillOpacity === "number") ? settings.precinctFillOpacity : DEFAULT_SETTINGS.precinctFillOpacity;
     PRECINCT_STATUS_COLOR_HEX = {
       "Not Yet Printed": c.notYetPrinted,
       "Printed": c.printed,
@@ -1517,13 +1550,18 @@
     // entirely (but keep the outline) so the status color doesn't compete
     // with the walked/not-walked parcel colors you're busy comparing.
     var colorSuppressed = walkArmed && id === openPrecinctId;
+    // The selected precinct's fill stays a touch more solid than the base
+    // transparency the slider controls, so it still reads as "selected"
+    // even at low settings -- but never past fully opaque.
+    var baseFillOpacity = PRECINCT_FILL_OPACITY;
+    var selectedFillOpacity = Math.min(1, baseFillOpacity + 0.08);
     return {
       stroke: true,
       color: isSelected ? SELECTED_BORDER_HEX : UNSELECTED_OUTLINE_HEX,
       weight: isSelected ? 3 : 1.75,
       opacity: isSelected ? 1 : 0.9,
       fillColor: PRECINCT_STATUS_COLOR_HEX[status],
-      fillOpacity: colorSuppressed ? 0 : (isSelected ? 0.3 : 0.22)
+      fillOpacity: colorSuppressed ? 0 : (isSelected ? selectedFillOpacity : baseFillOpacity)
     };
   }
 
@@ -2137,6 +2175,12 @@
     $("settings-color-unselected-outline").value = s.colors.unselectedOutline;
     $("settings-color-walked-parcel").value = s.colors.walkedParcel;
     $("settings-color-not-walked-parcel").value = s.colors.notWalkedParcel;
+    setPrecinctFillOpacityField(s.precinctFillOpacity);
+  }
+
+  function setPrecinctFillOpacityField(opacity) {
+    $("settings-precinct-fill-opacity").value = opacity;
+    $("settings-precinct-fill-opacity-value").textContent = Math.round(opacity * 100) + "%";
   }
 
   function openSettingsPanel() {
@@ -2177,6 +2221,12 @@
 
   $("settings-basemap").addEventListener("change", function () {
     draftSettings.basemap = this.value;
+    applySettings(draftSettings);
+  });
+
+  $("settings-precinct-fill-opacity").addEventListener("input", function () {
+    draftSettings.precinctFillOpacity = parseFloat(this.value);
+    $("settings-precinct-fill-opacity-value").textContent = Math.round(draftSettings.precinctFillOpacity * 100) + "%";
     applySettings(draftSettings);
   });
 
