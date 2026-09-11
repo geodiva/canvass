@@ -798,8 +798,7 @@
     MAP_ZOOM: 14,
     NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
     NEIGHBORHOOD_ZOOM_PHONE: 18,     // further back on phones -- 19 and 20 both felt too tight on iPhone
-    PARCELS_MIN_ZOOM_DELTA: Math.log2(1 / 0.8),  // ~0.32 zoom levels = "20% closer" than the initial city-wide view
-    PRECINCT_LABELS_MIN_ZOOM_DELTA: 0,  // precinct numbers stay off at the initial city-wide view -- too many, too big, too cluttered -- until zoomed in at least this much closer
+    PARCELS_MIN_ZOOM_DELTA: Math.log2(1 / 0.8),  // ~0.32 zoom levels = "20% closer" than the initial city-wide view -- precinct number labels turn on at this same threshold, see precinctLabelsMinZoom below
     LABELS_MIN_ZOOM: 18     // street-level zoom where individual lots are distinguishable enough for house numbers
   };
 
@@ -1172,9 +1171,11 @@
       parcelsMinZoom = map.getZoom() + CONFIG.PARCELS_MIN_ZOOM_DELTA;
       updateVisibleParcels();
 
-      // Same idea for precinct number labels: none of them shown yet at the
-      // initial city-wide view, added in once the viewer zooms in a little.
-      precinctLabelsMinZoom = map.getZoom() + CONFIG.PRECINCT_LABELS_MIN_ZOOM_DELTA;
+      // Precinct number labels turn on at that exact same threshold as the
+      // parcels layer (which is what shows walked/not-walked status) -- so
+      // the numbers appear right when there's enough detail on screen to
+      // actually use them to find a specific parcel.
+      precinctLabelsMinZoom = parcelsMinZoom;
       updatePrecinctLabelsVisibility();
 
       $("loading-overlay").classList.remove("show");
