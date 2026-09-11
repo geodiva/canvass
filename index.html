@@ -1239,13 +1239,17 @@
     var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
     var isSelected = id === selectedPrecinctId;
     var status = precinctStatusFor(id);
+    // While swipe-to-walk is armed for this precinct, drop its status fill
+    // entirely (but keep the outline) so the status color doesn't compete
+    // with the walked/not-walked parcel colors you're busy comparing.
+    var colorSuppressed = walkArmed && id === openPrecinctId;
     return {
       stroke: true,
       color: isSelected ? "#111318" : "#1A1A1A",
       weight: isSelected ? 3 : 1.75,
       opacity: isSelected ? 1 : 0.9,
       fillColor: PRECINCT_STATUS_COLOR_HEX[status],
-      fillOpacity: isSelected ? 0.3 : 0.22
+      fillOpacity: colorSuppressed ? 0 : (isSelected ? 0.3 : 0.22)
     };
   }
 
@@ -1358,9 +1362,17 @@
   }
 
   function highlightPrecinctListItem(id) {
+    var activeLi = null;
     document.querySelectorAll("#precinct-list li").forEach(function (li) {
-      li.classList.toggle("active", id && li.dataset.precinctId === id);
+      var isActive = !!(id && li.dataset.precinctId === id);
+      li.classList.toggle("active", isActive);
+      if (isActive) activeLi = li;
     });
+    // Selecting a precinct -- whether by clicking it on the map or clicking
+    // its row in this list -- scrolls the list so that row lands in the
+    // middle of the visible area, instead of merely scrolling the minimum
+    // needed to bring it into view.
+    if (activeLi) activeLi.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   function renderPrecinctLegend() {
@@ -1617,6 +1629,9 @@
       map.dragging.enable();
       if (map.tap) map.tap.enable();
     }
+    // Arming/disarming changes precinctStyle()'s output (see colorSuppressed
+    // above) for the open precinct -- restyle it immediately either way.
+    if (openPrecinctId) restylePrecinct(openPrecinctId);
   }
 
   $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true); });
