@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ami 4 Mayor Canvassing App</title>
+<title>Ami 4 Mayor Canvass Progress Map</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,6 +33,12 @@
     --precinct-printed: #E0B23F;
     --precinct-partially-walked: #3FAE62;
     --precinct-completed: #8E5FD1;
+
+    /* Overridable at runtime from the Settings panel (see applySettings());
+       these three are what "Save" there persists as the shared default. */
+    --precinct-selected-border: #0047AB;
+    --precinct-label-color: #0047AB;
+    --precinct-unselected-outline: #1A1A1A;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -214,8 +220,16 @@
   }
   #search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
+  /* flex: 0 0 auto (not flex: 1) is deliberate: these lists no longer grow
+     to fill their .sidebar-section -- they're capped to about 5 visible
+     rows (max-height set from JS in applyListHeightCaps(), which measures
+     an actual rendered row rather than guessing a font-dependent px value)
+     and scroll internally for the rest. Since .sidebar-section itself keeps
+     flex: 1 1 0 (three equal-height sections), whatever height a capped
+     list doesn't use is left as breathing room in that section instead of
+     one long list swallowing the whole sidebar. */
   #precinct-list, #address-list {
-    flex: 1;
+    flex: 0 0 auto;
     overflow-y: auto;
     list-style: none;
     margin: 0;
@@ -258,18 +272,17 @@
   }
 
   .status-legend {
-    padding: 8px 14px;
-    border-top: 1px solid var(--border);
+    padding: 10px 14px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 7px;
     flex-shrink: 0;
   }
   .legend-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.78rem;
+    font-size: 0.85rem;
     color: var(--ink);
   }
   .legend-swatch {
@@ -338,9 +351,22 @@
     display: inline-block;
     font-size: 17px;
     font-weight: 800;
-    color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9);
+    color: var(--precinct-label-color);
+    /* A light halo (rather than a dark one) is what keeps a cobalt-blue
+       label readable over dark satellite/hybrid imagery as well as the
+       light Streets basemap. */
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
     white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* ---------- selected precinct glow ---------- */
+  /* A separate SVG-rendered outline-only layer (see updateSelectedPrecinctHighlight)
+     drawn just for the currently-selected precinct -- the shared Canvas
+     renderer used for the other 68 precincts/11k+ parcels can't take CSS
+     filters, but a lone SVG path can. */
+  .precinct-selected-highlight {
+    filter: drop-shadow(0 0 3px var(--precinct-selected-border)) drop-shadow(0 0 7px var(--precinct-selected-border));
     pointer-events: none;
   }
 
@@ -440,6 +466,93 @@
   .btn.primary:hover { filter: brightness(1.08); }
   .btn:disabled { opacity: 0.55; cursor: default; }
 
+  /* ---------- settings toggle (gear) button ---------- */
+  #settings-toggle-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #settings-toggle-btn:hover { background: var(--paper); color: var(--ink); }
+
+  /* ---------- settings panel (hideable; colors + default basemap) ---------- */
+  .settings-panel {
+    position: fixed;
+    top: 62px;
+    right: 14px;
+    width: 300px;
+    max-width: calc(100vw - 28px);
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 14px 16px 16px;
+    z-index: 950;
+  }
+  .settings-panel[hidden] { display: none; }
+  .settings-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .settings-panel-header h3 { margin: 0; font-size: 0.95rem; }
+  #settings-close {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  #settings-close:hover { color: var(--ink); }
+  .settings-section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .settings-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .settings-section .field-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+  }
+  #settings-basemap {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+  .settings-color-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--ink);
+    padding: 5px 0;
+  }
+  .settings-color-row input[type="color"] {
+    width: 34px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+  }
+  #settings-status { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
   /* ---------- login screen ---------- */
   #login-overlay {
     position: fixed; inset: 0;
@@ -506,14 +619,12 @@
     main.layout { flex-direction: column; }
     aside.sidebar { width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
     #map { flex: 0 0 auto; height: 50vh; }
-    .status-legend { display: none; }
   }
 
   /* Phone, landscape: keep the side-by-side layout (map left, panel right)
      instead of stacking -- just trim the panel width for short screens. */
   @media (max-height: 500px) and (orientation: landscape) {
     aside.sidebar { width: 260px; }
-    .status-legend { display: none; }
   }
 </style>
 </head>
@@ -542,9 +653,10 @@
 
 <!-- ============ APP ============ -->
 <div id="topbar">
-  <div class="brand"><span class="dot"></span>Ami 4 Mayor Canvassing App</div>
+  <div class="brand"><span class="dot"></span>Ami 4 Mayor Canvass Progress Map</div>
   <div id="user-chip">
     <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
+    <button id="settings-toggle-btn" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
     <button id="logout-btn" type="button">Log out</button>
   </div>
 </div>
@@ -555,15 +667,20 @@
   <aside class="sidebar">
     <div class="sidebar-section">
       <div class="sidebar-header">
-        <h2>Precincts</h2>
+        <h2>Canvass progress:</h2>
       </div>
-      <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
       <div class="status-legend" id="precinct-legend">
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-not-printed)"></span><span class="legend-label">Not Yet Printed</span><span class="legend-count" id="legend-count-not-printed">0</span></div>
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-printed)"></span><span class="legend-label">Printed</span><span class="legend-count" id="legend-count-printed">0</span></div>
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-partially-walked)"></span><span class="legend-label">Partially Walked</span><span class="legend-count" id="legend-count-partially-walked">0</span></div>
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-completed)"></span><span class="legend-label">Completed</span><span class="legend-count" id="legend-count-completed">0</span></div>
       </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>Precincts</h2>
+      </div>
+      <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-header">
@@ -611,6 +728,50 @@
     <div class="dialog-actions">
       <button class="btn" id="precinct-cancel" type="button">Cancel</button>
       <button class="btn primary" id="precinct-save" type="button">Save</button>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS PANEL (hideable; colors + default basemap) ============ -->
+  <div class="settings-panel" id="settings-panel" hidden>
+    <div class="settings-panel-header">
+      <h3>Map Settings</h3>
+      <button id="settings-close" type="button" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Default Basemap</span>
+      <select id="settings-basemap">
+        <option value="Hybrid">Hybrid</option>
+        <option value="Satellite">Satellite</option>
+        <option value="Streets">Streets</option>
+      </select>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Precinct Status Colors</span>
+      <div class="settings-color-row"><span>Not Yet Printed</span><input type="color" id="settings-color-not-printed"></div>
+      <div class="settings-color-row"><span>Printed</span><input type="color" id="settings-color-printed"></div>
+      <div class="settings-color-row"><span>Partially Walked</span><input type="color" id="settings-color-partially-walked"></div>
+      <div class="settings-color-row"><span>Completed</span><input type="color" id="settings-color-completed"></div>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Precinct Outlines &amp; Labels</span>
+      <div class="settings-color-row"><span>Selected border / glow</span><input type="color" id="settings-color-selected-border"></div>
+      <div class="settings-color-row"><span>Number label</span><input type="color" id="settings-color-precinct-label"></div>
+      <div class="settings-color-row"><span>Unselected outline</span><input type="color" id="settings-color-unselected-outline"></div>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Parcel Colors</span>
+      <div class="settings-color-row"><span>Walked</span><input type="color" id="settings-color-walked-parcel"></div>
+      <div class="settings-color-row"><span>Not walked</span><input type="color" id="settings-color-not-walked-parcel"></div>
+    </div>
+
+    <div id="settings-status"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="settings-reset" type="button">Reset</button>
+      <button class="btn primary" id="settings-save" type="button">Save</button>
     </div>
   </div>
 </main>
@@ -665,7 +826,7 @@
   var precinctStatusData = {};   // precinctId -> { status, completedDate, updatedAt, updatedBy }
   var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
   var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
-  var SYNC_POLL_MS = 60000;      // how often to check the Sheet for other canvassers' updates
+  var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
   var selectedAddressKey = null;
   var selectedPrecinctId = null;
   var currentUser = null;      // { username, displayName }
@@ -681,29 +842,114 @@
   var swiping = false;
   var swipeTouchedThisStroke = {};
 
-  // Pulled from the CSS custom properties in :root, so a color only ever
-  // has to change in one place (the stylesheet) and the map fill, list
-  // dots, legend swatches, and panel buttons all stay in sync.
-  function cssVar(name, fallback) {
-    var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || fallback;
-  }
-  var WALKED_COLOR_HEX = cssVar("--walked-color", "#14181D");
-  var PARCEL_FILL_HEX = cssVar("--parcel-fill", "#4A6577");
   var PRECINCT_STATUSES = ["Not Yet Printed", "Printed", "Partially Walked", "Completed"];
   var DEFAULT_PRECINCT_STATUS = "Not Yet Printed";
-  var PRECINCT_STATUS_COLOR_HEX = {
-    "Not Yet Printed": cssVar("--precinct-not-printed", "#D1493F"),
-    "Printed": cssVar("--precinct-printed", "#E0B23F"),
-    "Partially Walked": cssVar("--precinct-partially-walked", "#3FAE62"),
-    "Completed": cssVar("--precinct-completed", "#8E5FD1")
-  };
   var PRECINCT_LEGEND_ID = {
     "Not Yet Printed": "not-printed",
     "Printed": "printed",
     "Partially Walked": "partially-walked",
     "Completed": "completed"
   };
+
+  // ================== SETTINGS (Settings panel) ==================
+  // Colors + default basemap, all overridable live from the Settings panel
+  // (the gear icon in the topbar). These defaults match the CSS :root
+  // values below so there's no visual flash before any saved settings are
+  // fetched. Saving in the panel persists these as the shared default for
+  // every canvasser (see Code.gs's Settings sheet / saveSettings action).
+  var DEFAULT_SETTINGS = {
+    basemap: "Streets",
+    colors: {
+      notYetPrinted: "#D1493F",
+      printed: "#E0B23F",
+      partiallyWalked: "#3FAE62",
+      completed: "#8E5FD1",
+      selectedBorder: "#0047AB",   // cobalt blue -- selected precinct's glowing border
+      precinctLabel: "#0047AB",    // cobalt blue -- precinct number labels
+      unselectedOutline: "#1A1A1A",
+      walkedParcel: "#14181D",
+      notWalkedParcel: "#4A6577"
+    }
+  };
+  function cloneSettings(s) { return JSON.parse(JSON.stringify(s)); }
+  // Merges a (possibly partial, e.g. from an older saved version) settings
+  // object onto a full base so a missing field falls back gracefully
+  // instead of turning into undefined and breaking a CSS/style call.
+  function mergeSettings(base, override) {
+    var merged = cloneSettings(base);
+    if (override && override.basemap) merged.basemap = override.basemap;
+    if (override && override.colors) {
+      Object.keys(merged.colors).forEach(function (k) {
+        if (override.colors[k]) merged.colors[k] = override.colors[k];
+      });
+    }
+    return merged;
+  }
+  var currentSettings = cloneSettings(DEFAULT_SETTINGS); // last applied (saved, or live-previewed) settings
+  var settingsUpdatedAt = null;   // server timestamp of currentSettings, so the sync poll only re-applies a newer save
+  var baseLayers = null;          // { "Hybrid": layer, "Satellite": layer, "Streets": layer } -- set in initMap()
+
+  // These four are plain JS values (not CSS var() references) because
+  // Leaflet's Canvas renderer draws to a <canvas> pixel buffer -- it can't
+  // resolve CSS custom properties the way the legend/list/label DOM can.
+  // applySettings() below keeps both in sync from one settings object.
+  var WALKED_COLOR_HEX = DEFAULT_SETTINGS.colors.walkedParcel;
+  var PARCEL_FILL_HEX = DEFAULT_SETTINGS.colors.notWalkedParcel;
+  var SELECTED_BORDER_HEX = DEFAULT_SETTINGS.colors.selectedBorder;
+  var UNSELECTED_OUTLINE_HEX = DEFAULT_SETTINGS.colors.unselectedOutline;
+  var PRECINCT_STATUS_COLOR_HEX = {
+    "Not Yet Printed": DEFAULT_SETTINGS.colors.notYetPrinted,
+    "Printed": DEFAULT_SETTINGS.colors.printed,
+    "Partially Walked": DEFAULT_SETTINGS.colors.partiallyWalked,
+    "Completed": DEFAULT_SETTINGS.colors.completed
+  };
+
+  // Applies a settings object to both the CSS custom properties (legend
+  // swatches, precinct number label color, selected-precinct glow color)
+  // and the JS-side color constants above, switches the basemap, and
+  // re-renders anything already built -- so a live preview in the Settings
+  // panel, or another canvasser's saved change arriving via the background
+  // sync poll, shows up immediately with no page reload.
+  function applySettings(settings) {
+    var c = settings.colors;
+    var root = document.documentElement.style;
+    root.setProperty("--precinct-not-printed", c.notYetPrinted);
+    root.setProperty("--precinct-printed", c.printed);
+    root.setProperty("--precinct-partially-walked", c.partiallyWalked);
+    root.setProperty("--precinct-completed", c.completed);
+    root.setProperty("--precinct-selected-border", c.selectedBorder);
+    root.setProperty("--precinct-label-color", c.precinctLabel);
+    root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
+    root.setProperty("--walked-color", c.walkedParcel);
+    root.setProperty("--parcel-fill", c.notWalkedParcel);
+
+    WALKED_COLOR_HEX = c.walkedParcel;
+    PARCEL_FILL_HEX = c.notWalkedParcel;
+    SELECTED_BORDER_HEX = c.selectedBorder;
+    UNSELECTED_OUTLINE_HEX = c.unselectedOutline;
+    PRECINCT_STATUS_COLOR_HEX = {
+      "Not Yet Printed": c.notYetPrinted,
+      "Printed": c.printed,
+      "Partially Walked": c.partiallyWalked,
+      "Completed": c.completed
+    };
+
+    setBasemap(settings.basemap);
+
+    if (precinctsLayer) precinctsLayer.setStyle(precinctStyle);
+    if (parcelsLayer) parcelsLayer.setStyle(parcelStyle);
+    if (selectedPrecinctId) updateSelectedPrecinctHighlight(selectedPrecinctId);
+    if (Object.keys(precinctIndex).length) buildPrecinctList();
+  }
+
+  function setBasemap(name) {
+    if (!map || !baseLayers || !baseLayers[name]) return;
+    Object.keys(baseLayers).forEach(function (key) {
+      var layer = baseLayers[key];
+      if (key === name) { if (!map.hasLayer(layer)) map.addLayer(layer); }
+      else if (map.hasLayer(layer)) map.removeLayer(layer);
+    });
+  }
 
   // ================== UTIL ==================
   function $(id) { return document.getElementById(id); }
@@ -860,10 +1106,15 @@
       maxNativeZoom: 19,
       attribution: ESRI_ATTRIBUTION
     });
-    var hybridLayer = L.layerGroup([hybridImagery, transportationLabels, placeLabels]).addTo(map);
+    var hybridLayer = L.layerGroup([hybridImagery, transportationLabels, placeLabels]);
+
+    baseLayers = { "Hybrid": hybridLayer, "Satellite": satelliteLayer, "Streets": streetsLayer };
+    // Streets is the out-of-the-box default; a saved setting (see the
+    // Settings panel) can switch this once it's fetched, via setBasemap().
+    setBasemap(currentSettings.basemap || DEFAULT_SETTINGS.basemap);
 
     L.control.layers(
-      { "Hybrid": hybridLayer, "Satellite": satelliteLayer, "Streets": streetsLayer },
+      baseLayers,
       null,
       { position: "topright" }
     ).addTo(map);
@@ -896,8 +1147,16 @@
         (stateRes.parcels || []).forEach(function (pc) {
           parcelWalkedData[keyFor(pc.address)] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
         });
+        if (stateRes.settings) {
+          currentSettings = mergeSettings(DEFAULT_SETTINGS, stateRes.settings);
+          settingsUpdatedAt = stateRes.settingsUpdatedAt || null;
+        }
       }
       lastSyncAt = (stateRes && stateRes.serverTime) || new Date().toISOString();
+      // Re-apply now that a saved shared default (if any) is merged in --
+      // before the precinct/parcel layers below are built, so their very
+      // first render already uses the right colors/basemap with no flash.
+      applySettings(currentSettings);
 
       addBoundaryDimming(boundaryGeoJson);
       addPrecincts(precinctsGeoJson);
@@ -965,6 +1224,11 @@
         buildPrecinctList();
         buildAddressList($("search-input").value);
       }
+      // Another canvasser may have saved new Settings-panel colors/basemap
+      // since our last check -- pick them up the same way, unless our own
+      // panel is currently open with unsaved edits (applySettingsFromServer
+      // checks that, and that lastSyncAt still advances even when it does).
+      if (res.settings) applySettingsFromServer(mergeSettings(DEFAULT_SETTINGS, res.settings), res.settingsUpdatedAt);
       if (res.serverTime && !anySkipped) lastSyncAt = res.serverTime;
     }).catch(function () { /* silent -- the next poll will just try again */ });
   }
@@ -1253,7 +1517,7 @@
     var colorSuppressed = walkArmed && id === openPrecinctId;
     return {
       stroke: true,
-      color: isSelected ? "#111318" : "#1A1A1A",
+      color: isSelected ? SELECTED_BORDER_HEX : UNSELECTED_OUTLINE_HEX,
       weight: isSelected ? 3 : 1.75,
       opacity: isSelected ? 1 : 0.9,
       fillColor: PRECINCT_STATUS_COLOR_HEX[status],
@@ -1336,9 +1600,36 @@
     selectedPrecinctId = id;
     if (previous && previous !== id) restylePrecinct(previous);
     restylePrecinct(id);
+    updateSelectedPrecinctHighlight(id);
     highlightPrecinctListItem(id);
     zoomToFitPrecinct(id);
     openPrecinctPanel(id);
+  }
+
+  var selectedPrecinctHighlightLayer = null;
+
+  // A lone SVG-rendered outline (see the .precinct-selected-highlight CSS
+  // filter) drawn just for the selected precinct, on top of the shared
+  // Canvas-rendered precinct/parcel layers -- gives it a soft cobalt glow
+  // that a Canvas path can't have on its own.
+  function updateSelectedPrecinctHighlight(id) {
+    if (selectedPrecinctHighlightLayer) {
+      map.removeLayer(selectedPrecinctHighlightLayer);
+      selectedPrecinctHighlightLayer = null;
+    }
+    var p = id && precinctIndex[id];
+    if (!p) return;
+    selectedPrecinctHighlightLayer = L.geoJSON(p.feature, {
+      renderer: L.svg(),
+      interactive: false,
+      style: {
+        className: "precinct-selected-highlight",
+        color: SELECTED_BORDER_HEX,
+        weight: 4,
+        opacity: 1,
+        fill: false
+      }
+    }).addTo(map);
   }
 
   function zoomToFitPrecinct(id) {
@@ -1364,30 +1655,64 @@
       listEl.innerHTML = html.join("");
     }
     renderPrecinctLegend();
+    applyListHeightCap(listEl);
+  }
+
+  // Caps a list to about 5 visible rows, scrolling internally for the rest,
+  // by measuring an actual rendered <li> rather than assuming a row height
+  // in px -- font rendering (and therefore row height) varies enough across
+  // browsers/OSes/zoom levels that a guessed constant would drift.
+  function applyListHeightCap(listEl) {
+    var row = listEl.querySelector("li[data-precinct-id], li[data-key]");
+    if (!row) return;
+    var rowHeight = row.getBoundingClientRect().height;
+    if (rowHeight > 0) listEl.style.maxHeight = (rowHeight * 5) + "px";
+  }
+  // Row height depends on font metrics, which can change on resize (e.g.
+  // phone rotation, browser zoom) -- recompute both lists' caps then too.
+  window.addEventListener("resize", function () {
+    applyListHeightCap($("precinct-list"));
+    applyListHeightCap($("address-list"));
+  });
+
+  // Shared by the precinct list row, the legend-adjacent progress readout,
+  // and the precinct panel's own title -- one format everywhere.
+  function precinctProgressText(id) {
+    var keys = precinctIndex[id].parcelKeys;
+    var walkedCount = keys.filter(currentWalked).length;
+    var total = keys.length;
+    var pct = total ? Math.round((walkedCount / total) * 100) : 0;
+    return walkedCount + "/" + total + " walked (" + pct + "%)";
   }
 
   function precinctRowHtml(id) {
     var status = precinctStatusFor(id);
     var color = PRECINCT_STATUS_COLOR_HEX[status];
-    var keys = precinctIndex[id].parcelKeys;
-    var walkedCount = keys.filter(currentWalked).length;
     return '<li data-precinct-id="' + escapeHtml(id) + '"' + (id === selectedPrecinctId ? ' class="active"' : "") + '>' +
       '<span class="status-dot" style="background:' + color + '"></span>' +
       '<span class="precinct-id">' + escapeHtml(id) + "</span>" +
-      '<span class="precinct-progress">' + walkedCount + "/" + keys.length + " walked</span></li>";
+      '<span class="precinct-progress">' + escapeHtml(precinctProgressText(id)) + "</span></li>";
   }
 
   // Cheap partial update for the one row that changed, instead of rebuilding
   // the whole list on every single swipe touch or status-button click.
   function updatePrecinctListRow(id) {
     var li = document.querySelector('#precinct-list li[data-precinct-id="' + cssEscape(id) + '"]');
-    if (!li) return;
-    var keys = precinctIndex[id].parcelKeys;
-    var walkedCount = keys.filter(currentWalked).length;
-    var progressEl = li.querySelector(".precinct-progress");
-    if (progressEl) progressEl.textContent = walkedCount + "/" + keys.length + " walked";
-    var dotEl = li.querySelector(".status-dot");
-    if (dotEl) dotEl.style.background = PRECINCT_STATUS_COLOR_HEX[precinctStatusFor(id)];
+    if (li) {
+      var progressEl = li.querySelector(".precinct-progress");
+      if (progressEl) progressEl.textContent = precinctProgressText(id);
+      var dotEl = li.querySelector(".status-dot");
+      if (dotEl) dotEl.style.background = PRECINCT_STATUS_COLOR_HEX[precinctStatusFor(id)];
+    }
+    updatePrecinctPanelTitle(id);
+  }
+
+  // Keeps the open precinct panel's own title (which also shows its
+  // walked count, same format as the list row) live during swiping --
+  // a no-op if this isn't the currently-open precinct.
+  function updatePrecinctPanelTitle(id) {
+    if (id !== openPrecinctId) return;
+    $("precinct-panel-title").textContent = "Precinct " + id + " — " + precinctProgressText(id);
   }
 
   function highlightPrecinctListItem(id) {
@@ -1406,13 +1731,18 @@
 
   function renderPrecinctLegend() {
     var counts = { "Not Yet Printed": 0, "Printed": 0, "Partially Walked": 0, "Completed": 0 };
+    var total = 0;
     Object.keys(precinctIndex).forEach(function (id) {
       var status = precinctStatusFor(id);
       if (counts.hasOwnProperty(status)) counts[status]++;
+      total++;
     });
     Object.keys(counts).forEach(function (status) {
       var el = $("legend-count-" + PRECINCT_LEGEND_ID[status]);
-      if (el) el.textContent = counts[status];
+      if (el) {
+        var pct = total ? Math.round((counts[status] / total) * 100) : 0;
+        el.textContent = counts[status] + " (" + pct + "%)";
+      }
     });
   }
 
@@ -1449,6 +1779,7 @@
       listEl.innerHTML = html.join("");
     }
     $("count-footer").textContent = keys.length + " address" + (keys.length === 1 ? "" : "es") + (q ? " \u2022 " + addresses.length + " match" + (addresses.length === 1 ? "" : "es") : "");
+    applyListHeightCap(listEl);
   }
 
   // Event delegation: one listener for the whole list instead of one per
@@ -1531,7 +1862,7 @@
     $("precinct-completed-date").value = pendingCompletedDate;
     $("precinct-meta").textContent = existing && existing.updatedAt ? lastUpdatedText(existing) : "";
 
-    $("precinct-panel-title").textContent = "Precinct " + id;
+    updatePrecinctPanelTitle(id);
     updatePrecinctStatusButtons();
     $("precinct-panel").hidden = false;
     positionPrecinctPanel(id);
@@ -1599,6 +1930,7 @@
     map.off("moveend zoomend", repositionOpenPanel);
     $("precinct-panel").hidden = true;
     selectedPrecinctId = null;
+    updateSelectedPrecinctHighlight(null);
     highlightPrecinctListItem(null);
     restylePrecinct(id);
     // Refresh the list row + legend now that openPrecinctId is cleared, so
@@ -1771,7 +2103,118 @@
     updatePrecinctListRow(openPrecinctId);
   }
 
+  // ================== SETTINGS PANEL ==================
+  // A hideable panel (the gear icon in the topbar) that lets an admin
+  // preview color/basemap changes live on the map, then Save them as the
+  // shared default every canvasser's browser picks up (via Code.gs's
+  // Settings sheet -- see applySettingsFromServer()/pollForUpdates()).
+  var draftSettings = null; // working copy while the panel is open; discarded on Cancel/close
+
+  function populateSettingsForm(s) {
+    $("settings-basemap").value = s.basemap;
+    $("settings-color-not-printed").value = s.colors.notYetPrinted;
+    $("settings-color-printed").value = s.colors.printed;
+    $("settings-color-partially-walked").value = s.colors.partiallyWalked;
+    $("settings-color-completed").value = s.colors.completed;
+    $("settings-color-selected-border").value = s.colors.selectedBorder;
+    $("settings-color-precinct-label").value = s.colors.precinctLabel;
+    $("settings-color-unselected-outline").value = s.colors.unselectedOutline;
+    $("settings-color-walked-parcel").value = s.colors.walkedParcel;
+    $("settings-color-not-walked-parcel").value = s.colors.notWalkedParcel;
+  }
+
+  function openSettingsPanel() {
+    draftSettings = cloneSettings(currentSettings);
+    populateSettingsForm(draftSettings);
+    $("settings-status").textContent = "";
+    $("settings-panel").hidden = false;
+  }
+
+  function closeSettingsPanel(discardPreview) {
+    $("settings-panel").hidden = true;
+    // Revert any live-previewed-but-unsaved change back to what's actually
+    // committed -- same discard-on-close pattern as the precinct panel.
+    if (discardPreview) applySettings(currentSettings);
+    draftSettings = null;
+  }
+
+  $("settings-toggle-btn").addEventListener("click", function () {
+    if ($("settings-panel").hidden) openSettingsPanel(); else closeSettingsPanel(true);
+  });
+  $("settings-close").addEventListener("click", function () { closeSettingsPanel(true); });
+
+  function wireSettingsColorField(inputId, setter) {
+    $(inputId).addEventListener("input", function () {
+      setter(draftSettings.colors, this.value);
+      applySettings(draftSettings);
+    });
+  }
+  wireSettingsColorField("settings-color-not-printed", function (c, v) { c.notYetPrinted = v; });
+  wireSettingsColorField("settings-color-printed", function (c, v) { c.printed = v; });
+  wireSettingsColorField("settings-color-partially-walked", function (c, v) { c.partiallyWalked = v; });
+  wireSettingsColorField("settings-color-completed", function (c, v) { c.completed = v; });
+  wireSettingsColorField("settings-color-selected-border", function (c, v) { c.selectedBorder = v; });
+  wireSettingsColorField("settings-color-precinct-label", function (c, v) { c.precinctLabel = v; });
+  wireSettingsColorField("settings-color-unselected-outline", function (c, v) { c.unselectedOutline = v; });
+  wireSettingsColorField("settings-color-walked-parcel", function (c, v) { c.walkedParcel = v; });
+  wireSettingsColorField("settings-color-not-walked-parcel", function (c, v) { c.notWalkedParcel = v; });
+
+  $("settings-basemap").addEventListener("change", function () {
+    draftSettings.basemap = this.value;
+    applySettings(draftSettings);
+  });
+
+  $("settings-reset").addEventListener("click", function () {
+    draftSettings = cloneSettings(DEFAULT_SETTINGS);
+    populateSettingsForm(draftSettings);
+    applySettings(draftSettings);
+  });
+
+  $("settings-save").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      var nowIso = new Date().toISOString();
+      if (DEMO_MODE) {
+        currentSettings = cloneSettings(draftSettings);
+        settingsUpdatedAt = nowIso;
+      } else {
+        var res = await apiPost({ action: "saveSettings", settings: draftSettings, username: currentUser.username });
+        if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
+        currentSettings = cloneSettings(draftSettings);
+        settingsUpdatedAt = res.updatedAt || nowIso;
+      }
+      closeSettingsPanel(false); // keep the now-committed preview applied, don't revert it
+    } catch (e) {
+      $("settings-status").textContent = "Could not save: " + (e.message || e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Save";
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !$("settings-panel").hidden) closeSettingsPanel(true);
+  });
+
+  // Applies a settings object that arrived from the server (initial load,
+  // or another canvasser's save picked up by the background sync poll) --
+  // distinct from the live-preview path above in that it becomes the new
+  // committed currentSettings outright, and is skipped if the panel is
+  // open (same "don't overwrite what's being edited" rule as precinct/
+  // parcel sync) or if it's not actually newer than what's already applied.
+  function applySettingsFromServer(settings, updatedAt) {
+    if (!settings) return;
+    if (!$("settings-panel").hidden) return;
+    if (settingsUpdatedAt && updatedAt && new Date(updatedAt).getTime() <= new Date(settingsUpdatedAt).getTime()) return;
+    currentSettings = cloneSettings(settings);
+    settingsUpdatedAt = updatedAt || settingsUpdatedAt;
+    applySettings(currentSettings);
+  }
+
   // ================== BOOT ==================
+  applySettings(currentSettings);
   initLoginNote();
   checkExistingSession();
 })();
