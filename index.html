@@ -209,7 +209,7 @@
   .sidebar-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
 
-  #search-input {
+  .sidebar-search-input {
     width: 100%;
     padding: 8px 10px;
     border: 1px solid var(--border);
@@ -218,7 +218,7 @@
     background: var(--paper);
     color: var(--ink);
   }
-  #search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .sidebar-search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
   /* flex: 0 0 auto (not flex: 1) is deliberate: these lists no longer grow
      to fill their .sidebar-section -- they're capped to about 5 visible
@@ -679,13 +679,14 @@
     <div class="sidebar-section">
       <div class="sidebar-header">
         <h2>Precincts</h2>
+        <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
       </div>
       <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-header">
         <h2>Address</h2>
-        <input id="search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+        <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
       </div>
       <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
       <div class="sidebar-footer" id="count-footer">&nbsp;</div>
@@ -938,7 +939,7 @@
     if (precinctsLayer) precinctsLayer.setStyle(precinctStyle);
     if (parcelsLayer) parcelsLayer.setStyle(parcelStyle);
     if (selectedPrecinctId) updateSelectedPrecinctHighlight(selectedPrecinctId);
-    if (Object.keys(precinctIndex).length) buildPrecinctList();
+    if (Object.keys(precinctIndex).length) buildPrecinctList($("precinct-search-input").value);
   }
 
   function setBasemap(name) {
@@ -1222,7 +1223,7 @@
       });
 
       if (touchedAny) {
-        buildPrecinctList();
+        buildPrecinctList($("precinct-search-input").value);
         buildAddressList($("search-input").value);
       }
       // Another canvasser may have saved new Settings-panel colors/basemap
@@ -1642,11 +1643,21 @@
   }
 
   // ================== PRECINCT LIST ==================
-  function buildPrecinctList() {
+  // filterText matches the same way the Address search does: a plain
+  // case-insensitive substring match against the precinct number, so typing
+  // "312" finds 31200, 31201, etc.
+  function buildPrecinctList(filterText) {
     var listEl = $("precinct-list");
-    var ids = Object.keys(precinctIndex).sort(function (a, b) { return Number(a) - Number(b); });
-    if (!ids.length) {
+    var allIds = Object.keys(precinctIndex);
+    var ids = allIds.slice().sort(function (a, b) { return Number(a) - Number(b); });
+
+    var q = (filterText || "").trim().toLowerCase();
+    if (q) ids = ids.filter(function (id) { return id.toLowerCase().indexOf(q) !== -1; });
+
+    if (!allIds.length) {
       listEl.innerHTML = '<li class="empty-msg">Loading precincts&hellip;</li>';
+    } else if (!ids.length) {
+      listEl.innerHTML = '<li class="empty-msg">No precincts match your search.</li>';
     } else {
       var html = new Array(ids.length);
       for (var i = 0; i < ids.length; i++) {
@@ -1658,6 +1669,10 @@
     renderPrecinctLegend();
     applyListHeightCap(listEl);
   }
+
+  $("precinct-search-input").addEventListener("input", function () {
+    buildPrecinctList(this.value);
+  });
 
   // Caps a list to about 5 visible rows, scrolling internally for the rest,
   // by measuring an actual rendered <li> rather than assuming a row height
@@ -2034,7 +2049,7 @@
       }
       pendingWalked = {};
       closePrecinctPanel(false);
-      buildPrecinctList();
+      buildPrecinctList($("precinct-search-input").value);
       buildAddressList($("search-input").value);
     } catch (e) {
       $("precinct-meta").textContent = "Could not save: " + (e.message || e);
