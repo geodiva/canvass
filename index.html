@@ -139,6 +139,11 @@
 
   #map { flex: 1; height: 100%; background: var(--paper); }
   #map.walk-armed { cursor: crosshair; touch-action: none; }
+  /* Leaflet adds its own "leaflet-interactive" class (cursor: pointer) to
+     whichever canvas/path is under the mouse while hovering an interactive
+     parcel or precinct shape -- which is most of the map -- and that would
+     otherwise beat the crosshair above. */
+  #map.walk-armed .leaflet-interactive { cursor: crosshair !important; }
 
   /* Kills the faint moving grid of hairline seams between adjacent map
      tiles that shows up mainly on mobile Safari/retina screens, worse when
@@ -880,6 +885,7 @@
       addBoundaryDimming(boundaryGeoJson);
       addPrecincts(precinctsGeoJson);
       addParcels(parcelsGeoJson);
+      addBoundaryOutline(boundaryGeoJson);
       buildPrecinctList();
       try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
 
@@ -1102,11 +1108,22 @@
       return;
     }
     // Matches the Voter Precinct Map webpage's cityMaskLayer/cityGlowLayer values.
+    // Just the dim "everywhere outside the city" shading -- this belongs
+    // underneath the precincts/parcels layers, so it's added first, before
+    // they are. The crisp boundary line itself is a separate layer (see
+    // addBoundaryOutline below) added *after* precincts/parcels so it stays
+    // visible on top instead of getting drawn over by them.
     boundaryLayer = L.geoJSON(mask, {
       interactive: false,
       style: { stroke: false, fillColor: "#08101a", fillOpacity: 0.3 }
     }).addTo(map);
-    // Outline the actual city boundary on top for clarity.
+  }
+
+  // Outlines the actual city boundary. Deliberately added to the map *after*
+  // the precincts and parcels layers (see the addPrecincts/addParcels call
+  // order in initMap) so this thin line renders on top of them instead of
+  // being drawn first and then covered by the precinct fills.
+  function addBoundaryOutline(boundaryGeoJson) {
     L.geoJSON(boundaryGeoJson, {
       interactive: false,
       style: { color: "#000000", weight: 2.5, opacity: 1, fill: false }
@@ -1189,9 +1206,18 @@
   }
 
   // ================== PRECINCTS ==================
-  function precinctStatusFor(id) {
+  // "Committed" = last saved status; "current" = committed, overridden by an
+  // in-progress (not yet saved) status choice while that precinct's panel is
+  // open -- same committed-vs-pending pattern as currentWalked() above, so
+  // the map's fill color updates the instant you click a status button
+  // instead of waiting for Save.
+  function committedPrecinctStatus(id) {
     var entry = precinctStatusData[id];
     return (entry && entry.status) || DEFAULT_PRECINCT_STATUS;
+  }
+  function precinctStatusFor(id) {
+    if (id === openPrecinctId && pendingStatus) return pendingStatus;
+    return committedPrecinctStatus(id);
   }
 
   function precinctStyle(feature) {
@@ -1220,6 +1246,14 @@
         var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
         precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [] };
         layer.on("click", function (e) {
+          // Swipe-to-walk owns clicks on the map while armed -- without this
+          // guard, a swipe stroke that starts on the open precinct's own
+          // polygon (true for most swipes, since parcels sit inside it) can
+          // still register as a "click" on that polygon (Leaflet's touch/tap
+          // handling and/or native click can fire independently of our own
+          // pointerdown handling), re-selecting the precinct mid-swipe and
+          // silently discarding whatever was just painted.
+          if (walkArmed) return;
           L.DomEvent.stopPropagation(e);
           selectPrecinct(id);
         });
@@ -1277,7 +1311,7 @@
   }
 
   // Cheap partial update for the one row that changed, instead of rebuilding
-  // the whole list on every single swipe touch.
+  // the whole list on every single swipe touch or status-button click.
   function updatePrecinctListRow(id) {
     var li = document.querySelector('#precinct-list li[data-precinct-id="' + cssEscape(id) + '"]');
     if (!li) return;
@@ -1285,6 +1319,8 @@
     var walkedCount = keys.filter(currentWalked).length;
     var progressEl = li.querySelector(".precinct-progress");
     if (progressEl) progressEl.textContent = walkedCount + "/" + keys.length + " walked";
+    var dotEl = li.querySelector(".status-dot");
+    if (dotEl) dotEl.style.background = PRECINCT_STATUS_COLOR_HEX[precinctStatusFor(id)];
   }
 
   function highlightPrecinctListItem(id) {
@@ -1490,6 +1526,12 @@
     selectedPrecinctId = null;
     highlightPrecinctListItem(null);
     restylePrecinct(id);
+    // Refresh the list row + legend now that openPrecinctId is cleared, so
+    // precinctStatusFor(id) resolves back to the committed status (matters
+    // whether this was a Save -- new committed value -- or a Cancel/Escape
+    // discarding a previewed status change).
+    updatePrecinctListRow(id);
+    renderPrecinctLegend();
   }
 
   function updatePrecinctStatusButtons() {
@@ -1503,6 +1545,13 @@
     btn.addEventListener("click", function () {
       pendingStatus = btn.dataset.status;
       updatePrecinctStatusButtons();
+      // Preview the chosen status immediately -- on the map, in its list
+      // row's dot, and in the legend counts -- rather than waiting for Save.
+      // (precinctStatusFor() only prefers pendingStatus for openPrecinctId,
+      // so this has no effect on any other precinct.)
+      restylePrecinct(openPrecinctId);
+      updatePrecinctListRow(openPrecinctId);
+      renderPrecinctLegend();
       // "Clicking any of the precinct buttons turns off the parcel radio btn."
       if (walkArmed) {
         $("precinct-walk-toggle").checked = false;
@@ -1519,7 +1568,21 @@
 
   function setWalkArmed(armed) {
     $("map").classList.toggle("walk-armed", armed);
-    if (armed) map.dragging.disable(); else map.dragging.enable();
+    if (armed) {
+      map.dragging.disable();
+      // Leaflet's touch/tap handler (active whenever the browser reports
+      // touch support -- true for a lot of laptops, not just phones) fires
+      // its own synthetic "click" on pointerup independently of the native
+      // mouse click our own preventDefault() suppresses. Without disabling
+      // it too, a swipe that starts on a precinct's own polygon (which is
+      // most of the time, since parcels sit inside it) gets read as a tap
+      // and re-opens/resets the panel mid-swipe, silently discarding
+      // whatever was just painted.
+      if (map.tap) map.tap.disable();
+    } else {
+      map.dragging.enable();
+      if (map.tap) map.tap.enable();
+    }
   }
 
   $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true); });
