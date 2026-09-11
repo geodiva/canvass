@@ -638,6 +638,7 @@
     NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
     NEIGHBORHOOD_ZOOM_PHONE: 18,     // further back on phones -- 19 and 20 both felt too tight on iPhone
     PARCELS_MIN_ZOOM_DELTA: Math.log2(1 / 0.8),  // ~0.32 zoom levels = "20% closer" than the initial city-wide view
+    PRECINCT_LABELS_MIN_ZOOM_DELTA: 1,  // precinct numbers stay off at the initial city-wide view -- too many, too big, too cluttered -- until zoomed in at least this much closer
     LABELS_MIN_ZOOM: 18     // street-level zoom where individual lots are distinguishable enough for house numbers
   };
 
@@ -654,6 +655,7 @@
   var map, boundaryLayer, parcelsLayer, precinctsLayer;
   var parcelsVisible = false;      // parcels layer is withheld until zoomed in enough (see updateVisibleParcels)
   var parcelsMinZoom = null;       // computed once the initial city-wide view is set
+  var precinctLabelsMinZoom = null; // computed once the initial city-wide view is set
   // address(lowercased) -> { addressExact, precinctId, layers: [L.Layer,...], features: [...] }
   // (grouped because a small number of addresses cover more than one parcel,
   // e.g. adjacent lots recorded under the same site address)
@@ -871,6 +873,7 @@
     map.on("click", function () { deselectParcel(); });
     map.on("zoomend", updateVisibleParcels);
     map.on("moveend", updateVisibleParcels);
+    map.on("zoomend", updatePrecinctLabelsVisibility);
     setupSwipeToWalk();
 
     Promise.all([
@@ -909,6 +912,11 @@
       // Precincts (far fewer, much larger shapes) stay visible at every zoom.
       parcelsMinZoom = map.getZoom() + CONFIG.PARCELS_MIN_ZOOM_DELTA;
       updateVisibleParcels();
+
+      // Same idea for precinct number labels: none of them shown yet at the
+      // initial city-wide view, added in once the viewer zooms in a little.
+      precinctLabelsMinZoom = map.getZoom() + CONFIG.PRECINCT_LABELS_MIN_ZOOM_DELTA;
+      updatePrecinctLabelsVisibility();
 
       $("loading-overlay").classList.remove("show");
 
@@ -1276,11 +1284,15 @@
       style: precinctStyle,
       onEachFeature: function (feature, layer) {
         var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
+        // Built now, but not attached to the map yet -- at the initial
+        // city-wide view, 69 of these at once is just a wall of oversized
+        // numbers. updatePrecinctLabelsVisibility() (below) adds them once
+        // the viewer has zoomed in a bit.
         var labelMarker = L.marker(precinctLabelLatLng(feature, layer), {
           icon: L.divIcon({ className: "precinct-number-label", html: "<span>" + escapeHtml(id) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
           interactive: false,
           keyboard: false
-        }).addTo(map);
+        });
         precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [], labelMarker: labelMarker };
         layer.on("click", function (e) {
           // Swipe-to-walk owns clicks on the map while armed -- without this
@@ -1296,10 +1308,27 @@
         });
       }
     }).addTo(map);
-    // Precincts are large, few in number, and meant to be visible at every
-    // zoom level (unlike the individual parcels), so they're added directly
-    // rather than going through the viewport-windowed visibility logic. Their
-    // number labels (added above) follow the same always-on visibility.
+    // Precincts themselves are large, few in number, and meant to be visible
+    // at every zoom level (unlike the individual parcels), so the shapes are
+    // added directly rather than going through viewport-windowed visibility.
+    // Their number labels are handled separately, gated on zoom (see above).
+  }
+
+  // Shows/hides every precinct's number label together, based on zoom --
+  // there's only 69 of them (unlike the viewport-windowed parcel labels), so
+  // there's no need to window these by location too, just by zoom level.
+  function updatePrecinctLabelsVisibility() {
+    if (precinctLabelsMinZoom === null) return;
+    // The tiny epsilon guards against floating-point dust in the added zoom
+    // delta (e.g. 14.999999999999998 instead of 15) landing a hair under
+    // the threshold right when a zoom exactly matches it.
+    var show = map.getZoom() >= precinctLabelsMinZoom - 1e-9;
+    Object.keys(precinctIndex).forEach(function (id) {
+      var marker = precinctIndex[id].labelMarker;
+      if (!marker) return;
+      if (show && !marker._map) map.addLayer(marker);
+      else if (!show && marker._map) map.removeLayer(marker);
+    });
   }
 
   function selectPrecinct(id) {
