@@ -1903,7 +1903,7 @@
 
   // ================== PRECINCT PANEL ==================
   function openPrecinctPanel(id) {
-    if (openPrecinctId && openPrecinctId !== id) closePrecinctPanel(true);
+    if (openPrecinctId && openPrecinctId !== id) closePrecinctPanel(true, { keepSelectionState: true });
     openPrecinctId = id;
     pendingWalked = {};
     walkArmed = false;
@@ -1967,7 +1967,30 @@
     panel.style.top = Math.max(minY, Math.min(pick.y, maxY)) + "px";
   }
 
-  function closePrecinctPanel(discard) {
+  // Closing the precinct panel (Cancel or Save) backs the map out one zoom
+  // level from wherever zoomToFitPrecinct() flew it in to -- so after you're
+  // done with a precinct, you can immediately see more of what's around it
+  // instead of staying zoomed all the way in. Not used when the panel is
+  // simply switching to a *different* precinct (see openPrecinctPanel),
+  // since that flies to a new set of bounds right afterward anyway.
+  function zoomOutAfterPrecinctClose() {
+    if (!map) return;
+    try {
+      map.setZoom(Math.max(map.getZoom() - 1, map.getMinZoom()), { animate: true });
+    } catch (e) { /* ignore */ }
+  }
+
+  // opts:
+  //   zoomOut          -- back the map out a level after closing (Cancel/Save/Escape)
+  //   keepSelectionState -- skip clearing selectedPrecinctId/the glow highlight/the
+  //                         list's "active" row. Used only when openPrecinctPanel()
+  //                         is closing the PREVIOUS precinct because the panel is
+  //                         switching straight to a new one -- selectPrecinct()
+  //                         already applied the new precinct's selection state
+  //                         just before this runs, and clearing it here would
+  //                         wipe that back out from under it.
+  function closePrecinctPanel(discard, opts) {
+    opts = opts || {};
     if (!openPrecinctId) return;
     var id = openPrecinctId;
     if (discard && Object.keys(pendingWalked).length) {
@@ -1983,9 +2006,11 @@
     setWalkArmed(false);
     map.off("moveend zoomend", repositionOpenPanel);
     $("precinct-panel").hidden = true;
-    selectedPrecinctId = null;
-    updateSelectedPrecinctHighlight(null);
-    highlightPrecinctListItem(null);
+    if (!opts.keepSelectionState) {
+      selectedPrecinctId = null;
+      updateSelectedPrecinctHighlight(null);
+      highlightPrecinctListItem(null);
+    }
     restylePrecinct(id);
     // Refresh the list row + legend now that openPrecinctId is cleared, so
     // precinctStatusFor(id) resolves back to the committed status (matters
@@ -1993,6 +2018,7 @@
     // discarding a previewed status change).
     updatePrecinctListRow(id);
     renderPrecinctLegend();
+    if (opts.zoomOut) zoomOutAfterPrecinctClose();
   }
 
   function updatePrecinctStatusButtons() {
@@ -2049,7 +2075,7 @@
     if (openPrecinctId) restylePrecinct(openPrecinctId);
   }
 
-  $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true); });
+  $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true, { zoomOut: true }); });
 
   $("precinct-save").addEventListener("click", async function () {
     if (!openPrecinctId) return;
@@ -2086,7 +2112,7 @@
         });
       }
       pendingWalked = {};
-      closePrecinctPanel(false);
+      closePrecinctPanel(false, { zoomOut: true });
       buildPrecinctList($("precinct-search-input").value);
       buildAddressList($("search-input").value);
     } catch (e) {
@@ -2098,7 +2124,7 @@
   });
 
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true);
+    if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true, { zoomOut: true });
   });
 
   // ================== SWIPE TO MARK WALKED ==================
