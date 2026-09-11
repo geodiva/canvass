@@ -330,6 +330,20 @@
     pointer-events: none;
   }
 
+  /* ---------- precinct number labels ---------- */
+  .precinct-number-label { background: transparent; border: none; }
+  .precinct-number-label span {
+    transform: translate(-50%, -50%);
+    position: relative;
+    display: inline-block;
+    font-size: 17px;
+    font-weight: 800;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
   /* ---------- floating precinct panel ---------- */
   .precinct-panel {
     position: absolute;
@@ -1178,6 +1192,12 @@
   function addParcels(parcelsGeoJson) {
     parcelsLayer = L.geoJSON(parcelsGeoJson, {
       style: parcelStyle,
+      // Parcels are click-through: selecting/zooming to an address is only
+      // ever done from the Address list now, not by clicking its shape on
+      // the map. Marking the layer non-interactive also means a click on a
+      // parcel falls straight through to whatever's underneath it (the
+      // precinct it sits inside), instead of the parcel intercepting it.
+      interactive: false,
       onEachFeature: function (feature, layer) {
         var addr = getAddr(feature);
         if (!addr) return;
@@ -1192,11 +1212,6 @@
         }
         parcelIndex[key].layers.push(layer);
         parcelIndex[key].features.push(feature);
-        layer.on("click", function (e) {
-          if (walkArmed) return; // swipe-to-walk mode owns clicks on the map while armed
-          L.DomEvent.stopPropagation(e);
-          selectParcel(key);
-        });
       }
     });
     // Not added to the map yet -- updateVisibleParcels() reveals nearby ones once
@@ -1239,12 +1254,30 @@
     if (p && p.layer) p.layer.setStyle(precinctStyle(p.feature));
   }
 
+  // A point guaranteed to fall inside the precinct's own polygon (unlike a
+  // bounding-box center, which can land outside an irregular/concave
+  // precinct shape) -- used to place its number label.
+  function precinctLabelLatLng(feature, layer) {
+    try {
+      var pt = turf.pointOnFeature(feature);
+      var c = pt.geometry.coordinates;
+      return L.latLng(c[1], c[0]);
+    } catch (e) {
+      return layer.getBounds().getCenter();
+    }
+  }
+
   function addPrecincts(precinctsGeoJson) {
     precinctsLayer = L.geoJSON(precinctsGeoJson, {
       style: precinctStyle,
       onEachFeature: function (feature, layer) {
         var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
-        precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [] };
+        var labelMarker = L.marker(precinctLabelLatLng(feature, layer), {
+          icon: L.divIcon({ className: "precinct-number-label", html: "<span>" + escapeHtml(id) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
+          interactive: false,
+          keyboard: false
+        }).addTo(map);
+        precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [], labelMarker: labelMarker };
         layer.on("click", function (e) {
           // Swipe-to-walk owns clicks on the map while armed -- without this
           // guard, a swipe stroke that starts on the open precinct's own
@@ -1261,7 +1294,8 @@
     }).addTo(map);
     // Precincts are large, few in number, and meant to be visible at every
     // zoom level (unlike the individual parcels), so they're added directly
-    // rather than going through the viewport-windowed visibility logic.
+    // rather than going through the viewport-windowed visibility logic. Their
+    // number labels (added above) follow the same always-on visibility.
   }
 
   function selectPrecinct(id) {
