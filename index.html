@@ -39,6 +39,11 @@
     --precinct-selected-border: #0047AB;
     --precinct-label-color: #0047AB;
     --precinct-unselected-outline: #1A1A1A;
+
+    /* A soft top-to-bottom wash behind each sidebar section's heading (see
+       .sidebar-header) -- tinted with the same brand accent as the topbar
+       dot, faded down to fully transparent. */
+    --header-tint: rgba(224, 98, 43, 0.14);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -54,6 +59,7 @@
       --accent: #F0793F;
       --accent-ink: #171008;
       --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
+      --header-tint: rgba(240, 121, 63, 0.18);
     }
   }
   :root[data-theme="dark"] {
@@ -68,6 +74,7 @@
     --accent: #F0793F;
     --accent-ink: #171008;
     --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
+    --header-tint: rgba(240, 121, 63, 0.18);
   }
 
   * { box-sizing: border-box; }
@@ -206,7 +213,17 @@
   }
   .sidebar-section:last-child { border-bottom: none; }
 
-  .sidebar-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .sidebar-header {
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    /* A vertical tint sitting behind the heading label -- fades to fully
+       transparent well before the bottom of the header so it reads as a
+       backdrop for the title, not a solid banner. Anything below it (like
+       the search boxes) already has its own opaque background and simply
+       sits on top. */
+    background: linear-gradient(180deg, var(--header-tint), transparent 85%);
+  }
   .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
 
   .sidebar-search-input {
@@ -341,6 +358,14 @@
     text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
     white-space: nowrap;
     pointer-events: none;
+  }
+  /* Shown for a selected precinct's parcels at whatever (often lower) zoom
+     zoomToFitPrecinct settles on -- each lot is smaller on screen there
+     than a normal LABELS_MIN_ZOOM view, so the label needs to shrink to
+     match instead of overwhelming it. */
+  .parcel-number-label.compact span {
+    font-size: 9px;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.85);
   }
 
   /* ---------- precinct number labels ---------- */
@@ -1294,7 +1319,14 @@
     parcelsVisible = true;
 
     var viewBounds = map.getBounds().pad(0.25); // 25% buffer so nearby parcels are ready just before they scroll into view
-    var showLabels = zoom >= CONFIG.LABELS_MIN_ZOOM;
+    // Labels normally wait for real street-level zoom (LABELS_MIN_ZOOM) --
+    // but a selected precinct's own parcels get labeled as soon as they're
+    // visible at all, even though zoomToFitPrecinct often settles at a zoom
+    // well below that threshold (it fits the WHOLE precinct, not one lot).
+    // Those get the "compact" (smaller) label style below since each parcel
+    // is a lot smaller on screen at that zoom than a normal LABELS_MIN_ZOOM
+    // view would make it.
+    var globalLabelsOn = zoom >= CONFIG.LABELS_MIN_ZOOM;
 
     Object.keys(parcelIndex).forEach(function (key) {
       var entry = parcelIndex[key];
@@ -1307,8 +1339,9 @@
         else if (!inView && l._map) map.removeLayer(l);
       });
 
-      if (anyInView && showLabels && entry.numberText) {
-        addNumberLabel(entry);
+      var inSelectedPrecinct = !!(selectedPrecinctId && entry.precinctId === selectedPrecinctId);
+      if (anyInView && entry.numberText && (globalLabelsOn || inSelectedPrecinct)) {
+        addNumberLabel(entry, !globalLabelsOn);
       } else {
         removeNumberLabel(entry);
       }
@@ -1318,12 +1351,16 @@
   // House-number labels ride the same visibility pass as the parcel
   // polygons above -- only ever a few dozen exist at once, drawn from the
   // SITEADD data we already have (no external dataset needed).
-  function addNumberLabel(entry) {
-    if (entry.labelMarker) return;
+  // compact -- use the smaller ".compact" label style (see the selected
+  // precinct case in updateVisibleParcels above).
+  function addNumberLabel(entry, compact) {
+    if (entry.labelMarker && entry.labelCompact === compact) return;
+    if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
     var center;
     try { center = groupBounds(entry).getCenter(); } catch (e) { return; }
+    entry.labelCompact = compact;
     entry.labelMarker = L.marker(center, {
-      icon: L.divIcon({ className: "parcel-number-label", html: "<span>" + escapeHtml(entry.numberText) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
+      icon: L.divIcon({ className: "parcel-number-label" + (compact ? " compact" : ""), html: "<span>" + escapeHtml(entry.numberText) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
       interactive: false,
       keyboard: false
     }).addTo(map);
@@ -1331,6 +1368,7 @@
 
   function removeNumberLabel(entry) {
     if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
+    entry.labelCompact = null;
   }
 
   // ================== MY LOCATION ==================
@@ -1472,19 +1510,23 @@
     // property ends and the next begins while swiping to mark them walked.
     var inSelectedPrecinct = !!(entry && selectedPrecinctId && entry.precinctId === selectedPrecinctId);
     var walked = currentWalked(key);
+    var stateColor = walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX;
     return {
       // Outlines are otherwise skipped entirely -- stroking 10k+ paths is
       // the expensive part of drawing this layer on lower-powered devices,
       // and the fill alone is enough to read the parcels everywhere else.
       stroke: isSelected || inSelectedPrecinct,
-      color: isSelected ? "#1257FF" : UNSELECTED_OUTLINE_HEX,
+      // The selected (address-search) outline matches that parcel's own
+      // walked/not-walked color rather than a fixed color, so it reads as
+      // "this parcel, and here's its state" together.
+      color: isSelected ? stateColor : UNSELECTED_OUTLINE_HEX,
       // Weight 1 / opacity 0.6 (the original values here) turned out to
       // blend into the precinct fill and the parcels' own low-opacity fill
       // closely enough that the outline was easy to miss entirely rather
       // than just subtle -- bumped both so it reads clearly at a glance.
       weight: isSelected ? 3 : (inSelectedPrecinct ? 1.5 : 0),
       opacity: isSelected ? 1 : (inSelectedPrecinct ? 0.9 : 0.6),
-      fillColor: walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX,
+      fillColor: stateColor,
       fillOpacity: walked ? 0.6 : (isSelected ? 0.3 : 0.12)
     };
   }
@@ -1665,6 +1707,11 @@
     updateSelectedPrecinctHighlight(id);
     highlightPrecinctListItem(id);
     zoomToFitPrecinct(id);
+    // Also refresh immediately (not just via the fly animation's zoomend) --
+    // if the precinct is already fully in view at the current zoom,
+    // flyToBounds may not move the map at all, and the new precinct's
+    // parcels still need their labels turned on right away.
+    updateVisibleParcels();
     openPrecinctPanel(id);
   }
 
@@ -2033,6 +2080,11 @@
       updateSelectedPrecinctHighlight(null);
       highlightPrecinctListItem(null);
       restylePrecinctParcels(id); // turn this precinct's parcel outlines back off
+      // Also turn its parcels' labels back off right away -- same reasoning
+      // as the immediate call in selectPrecinct(): the zoom-out below may
+      // not actually change the zoom (e.g. already at minZoom), so it can't
+      // always be relied on to trigger this via zoomend.
+      updateVisibleParcels();
     }
     restylePrecinct(id);
     // Refresh the list row + legend now that openPrecinctId is cleared, so
