@@ -40,10 +40,13 @@
     --precinct-label-color: #0047AB;
     --precinct-unselected-outline: #1A1A1A;
 
-    /* A soft top-to-bottom wash behind each sidebar section's heading (see
-       .sidebar-header) -- tinted with the same brand accent as the topbar
-       dot, faded down to fully transparent. */
-    --header-tint: rgba(224, 98, 43, 0.14);
+    /* A soft top-to-bottom wash behind the topbar row and each sidebar
+       section's heading (see #topbar and .sidebar-header). This fallback
+       (plain violet, matching DEFAULT_SETTINGS.colors.headerTint) only
+       shows for the instant before JS runs -- applySettings() overwrites it
+       as an inline style with the settings-panel color (default or saved)
+       converted to rgba(), so it's also live-configurable from Settings. */
+    --header-tint: rgba(124, 58, 237, 0.16);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -59,7 +62,6 @@
       --accent: #F0793F;
       --accent-ink: #171008;
       --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
-      --header-tint: rgba(240, 121, 63, 0.18);
     }
   }
   :root[data-theme="dark"] {
@@ -74,7 +76,6 @@
     --accent: #F0793F;
     --accent-ink: #171008;
     --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
-    --header-tint: rgba(240, 121, 63, 0.18);
   }
 
   * { box-sizing: border-box; }
@@ -97,7 +98,9 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 14px;
-    background: var(--panel);
+    /* Same header-tint wash as .sidebar-header, layered over the row's
+       normal panel background rather than replacing it. */
+    background: linear-gradient(180deg, var(--header-tint), transparent 85%), var(--panel);
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow);
     position: relative;
@@ -796,6 +799,11 @@
     </div>
 
     <div class="settings-section">
+      <span class="field-label">Interface</span>
+      <div class="settings-color-row"><span>Section heading tint</span><input type="color" id="settings-color-header-tint"></div>
+    </div>
+
+    <div class="settings-section">
       <span class="field-label">Precinct Status Colors</span>
       <div class="settings-color-row"><span>Not Yet Printed</span><input type="color" id="settings-color-not-printed"></div>
       <div class="settings-color-row"><span>Printed</span><input type="color" id="settings-color-printed"></div>
@@ -921,7 +929,8 @@
       precinctLabel: "#0047AB",    // cobalt blue -- precinct number labels
       unselectedOutline: "#1A1A1A",
       walkedParcel: "#14181D",
-      notWalkedParcel: "#4A6577"
+      notWalkedParcel: "#4A6577",
+      headerTint: "#7C3AED"   // violet -- the gradient wash behind the topbar row and each sidebar section heading
     }
   };
   function cloneSettings(s) { return JSON.parse(JSON.stringify(s)); }
@@ -979,6 +988,11 @@
     root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
     root.setProperty("--walked-color", c.walkedParcel);
     root.setProperty("--parcel-fill", c.notWalkedParcel);
+    // The tint itself needs an alpha channel to fade into transparent (see
+    // #topbar / .sidebar-header) -- <input type="color"> can't hold one, so
+    // the picker stores a plain opaque hex and this converts it to an rgba()
+    // at a fixed alpha every time settings are applied.
+    root.setProperty("--header-tint", hexToRgba(c.headerTint, HEADER_TINT_ALPHA));
 
     WALKED_COLOR_HEX = c.walkedParcel;
     PARCEL_FILL_HEX = c.notWalkedParcel;
@@ -1018,6 +1032,17 @@
   }
   function keyFor(addr) { return String(addr || "").trim().toLowerCase(); }
   function cssEscape(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"); }
+
+  // Fixed alpha the header-tint gradient (topbar + sidebar section headings)
+  // is drawn at -- the Settings panel only lets you pick the color itself.
+  var HEADER_TINT_ALPHA = 0.16;
+  function hexToRgba(hex, alpha) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return hex; // not a plain #rrggbb -- hand back whatever we got rather than guess
+    var num = parseInt(m[1], 16);
+    var r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+    return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
 
   async function sha256Hex(text) {
     var enc = new TextEncoder().encode(text);
@@ -2267,6 +2292,7 @@
 
   function populateSettingsForm(s) {
     $("settings-basemap").value = s.basemap;
+    $("settings-color-header-tint").value = s.colors.headerTint;
     $("settings-color-not-printed").value = s.colors.notYetPrinted;
     $("settings-color-printed").value = s.colors.printed;
     $("settings-color-partially-walked").value = s.colors.partiallyWalked;
@@ -2310,6 +2336,7 @@
       applySettings(draftSettings);
     });
   }
+  wireSettingsColorField("settings-color-header-tint", function (c, v) { c.headerTint = v; });
   wireSettingsColorField("settings-color-not-printed", function (c, v) { c.notYetPrinted = v; });
   wireSettingsColorField("settings-color-printed", function (c, v) { c.printed = v; });
   wireSettingsColorField("settings-color-partially-walked", function (c, v) { c.partiallyWalked = v; });
