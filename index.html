@@ -1464,17 +1464,22 @@
 
   // ================== PARCEL STYLING ==================
   function styleForKey(key) {
+    var entry = parcelIndex[key];
     var isSelected = key && key === selectedAddressKey;
+    // While a precinct's panel is open, every parcel that belongs to it gets
+    // a thin outline too -- with 10-300+ lots often packed tightly together,
+    // seeing each one's boundary makes it much easier to tell where one
+    // property ends and the next begins while swiping to mark them walked.
+    var inSelectedPrecinct = !!(entry && selectedPrecinctId && entry.precinctId === selectedPrecinctId);
     var walked = currentWalked(key);
     return {
-      // Outlines are skipped entirely except on the selected parcel --
-      // stroking 10k+ paths is the expensive part of drawing this layer on
-      // lower-powered devices, and the fill alone is enough to read the
-      // parcels; only the current selection needs a border.
-      stroke: isSelected,
-      color: "#1257FF",
-      weight: isSelected ? 3 : 0,
-      opacity: 1,
+      // Outlines are otherwise skipped entirely -- stroking 10k+ paths is
+      // the expensive part of drawing this layer on lower-powered devices,
+      // and the fill alone is enough to read the parcels everywhere else.
+      stroke: isSelected || inSelectedPrecinct,
+      color: isSelected ? "#1257FF" : UNSELECTED_OUTLINE_HEX,
+      weight: isSelected ? 3 : (inSelectedPrecinct ? 1 : 0),
+      opacity: isSelected ? 1 : 0.6,
       fillColor: walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX,
       fillOpacity: walked ? 0.6 : (isSelected ? 0.3 : 0.12)
     };
@@ -1570,6 +1575,15 @@
     if (p && p.layer) p.layer.setStyle(precinctStyle(p.feature));
   }
 
+  // Restyles just the parcels that belong to one precinct -- used to turn
+  // their outline on/off as a precinct becomes selected/deselected, without
+  // touching the other 10k+ parcels elsewhere on the map.
+  function restylePrecinctParcels(id) {
+    var p = id && precinctIndex[id];
+    if (!p) return;
+    p.parcelKeys.forEach(restyleEntry);
+  }
+
   // A point guaranteed to fall inside the precinct's own polygon (unlike a
   // bounding-box center, which can land outside an irregular/concave
   // precinct shape) -- used to place its number label.
@@ -1638,8 +1652,12 @@
   function selectPrecinct(id) {
     var previous = selectedPrecinctId;
     selectedPrecinctId = id;
-    if (previous && previous !== id) restylePrecinct(previous);
+    if (previous && previous !== id) {
+      restylePrecinct(previous);
+      restylePrecinctParcels(previous);
+    }
     restylePrecinct(id);
+    restylePrecinctParcels(id);
     updateSelectedPrecinctHighlight(id);
     highlightPrecinctListItem(id);
     zoomToFitPrecinct(id);
@@ -2010,6 +2028,7 @@
       selectedPrecinctId = null;
       updateSelectedPrecinctHighlight(null);
       highlightPrecinctListItem(null);
+      restylePrecinctParcels(id); // turn this precinct's parcel outlines back off
     }
     restylePrecinct(id);
     // Refresh the list row + legend now that openPrecinctId is cleared, so
