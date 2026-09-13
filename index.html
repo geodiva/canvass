@@ -689,7 +689,7 @@
   <aside class="sidebar">
     <div class="sidebar-section">
       <div class="sidebar-header">
-        <h2>Canvass progress:</h2>
+        <h2>Canvassing progress:</h2>
       </div>
       <div class="status-legend" id="precinct-legend">
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-not-printed)"></span><span class="legend-label">Not Yet Printed</span><span class="legend-count" id="legend-count-not-printed">0</span></div>
@@ -1478,8 +1478,12 @@
       // and the fill alone is enough to read the parcels everywhere else.
       stroke: isSelected || inSelectedPrecinct,
       color: isSelected ? "#1257FF" : UNSELECTED_OUTLINE_HEX,
-      weight: isSelected ? 3 : (inSelectedPrecinct ? 1 : 0),
-      opacity: isSelected ? 1 : 0.6,
+      // Weight 1 / opacity 0.6 (the original values here) turned out to
+      // blend into the precinct fill and the parcels' own low-opacity fill
+      // closely enough that the outline was easy to miss entirely rather
+      // than just subtle -- bumped both so it reads clearly at a glance.
+      weight: isSelected ? 3 : (inSelectedPrecinct ? 1.5 : 0),
+      opacity: isSelected ? 1 : (inSelectedPrecinct ? 0.9 : 0.6),
       fillColor: walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX,
       fillOpacity: walked ? 0.6 : (isSelected ? 0.3 : 0.12)
     };
