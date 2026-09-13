@@ -916,7 +916,8 @@
     NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
     NEIGHBORHOOD_ZOOM_PHONE: 18,     // further back on phones -- 19 and 20 both felt too tight on iPhone
     PARCELS_MIN_ZOOM_DELTA: Math.log2(1 / 0.8),  // ~0.32 zoom levels = "20% closer" than the initial city-wide view -- precinct number labels turn on at this same threshold, see precinctLabelsMinZoom below
-    LABELS_MIN_ZOOM: 18     // street-level zoom where individual lots are distinguishable enough for house numbers
+    LABELS_MIN_ZOOM: 18,    // street-level zoom where individual lots are distinguishable enough for house numbers
+    SELECTED_PRECINCT_LABELS_MIN_ZOOM: 16  // below/at this zoom, even a selected precinct's compact labels are hidden -- too cluttered/illegible that far out
   };
 
   // Judge "phone" by the smaller viewport dimension so it stays correct
@@ -1420,8 +1421,11 @@
     // well below that threshold (it fits the WHOLE precinct, not one lot).
     // Those get the "compact" (smaller) label style below since each parcel
     // is a lot smaller on screen at that zoom than a normal LABELS_MIN_ZOOM
-    // view would make it.
+    // view would make it. Below SELECTED_PRECINCT_LABELS_MIN_ZOOM, though,
+    // even the compact labels are too small/cluttered to be worth showing,
+    // so they stay off until the canvasser zooms in a bit further.
     var globalLabelsOn = zoom >= CONFIG.LABELS_MIN_ZOOM;
+    var selectedPrecinctLabelsOn = zoom > CONFIG.SELECTED_PRECINCT_LABELS_MIN_ZOOM;
 
     Object.keys(parcelIndex).forEach(function (key) {
       var entry = parcelIndex[key];
@@ -1435,7 +1439,8 @@
       });
 
       var inSelectedPrecinct = !!(selectedPrecinctId && entry.precinctId === selectedPrecinctId);
-      if (anyInView && entry.numberText && (globalLabelsOn || inSelectedPrecinct)) {
+      var showLabel = globalLabelsOn || (inSelectedPrecinct && selectedPrecinctLabelsOn);
+      if (anyInView && entry.numberText && showLabel) {
         addNumberLabel(entry, !globalLabelsOn);
       } else {
         removeNumberLabel(entry);
@@ -1812,13 +1817,26 @@
     restylePrecinctParcels(id);
     updateSelectedPrecinctHighlight(id);
     highlightPrecinctListItem(id);
-    zoomToFitPrecinct(id);
+    // If a different precinct's panel is already open, close it right away
+    // rather than leaving it on screen (at its old position) for the whole
+    // duration of the fly-to-precinct animation below -- openPrecinctPanel(id)
+    // itself is now deferred until that animation finishes (see
+    // zoomToFitPrecinct's onDone callback), so nothing later does this for us.
+    if (openPrecinctId && openPrecinctId !== id) closePrecinctPanel(true, { keepSelectionState: true });
     // Also refresh immediately (not just via the fly animation's zoomend) --
     // if the precinct is already fully in view at the current zoom,
     // flyToBounds may not move the map at all, and the new precinct's
     // parcels still need their labels turned on right away.
     updateVisibleParcels();
-    openPrecinctPanel(id);
+    // Wait for the fly-to-precinct animation to actually finish before
+    // showing the info panel -- otherwise it pops up at a stale,
+    // pre-animation position and visibly snaps once the flight settles.
+    zoomToFitPrecinct(id, function () {
+      // Guard against a rapid re-click / precinct switch while the flight
+      // was in progress: only open the panel for whichever precinct is
+      // still selected by the time this fires.
+      if (selectedPrecinctId === id) openPrecinctPanel(id);
+    });
   }
 
   var selectedPrecinctHighlightLayer = null;
@@ -1847,12 +1865,54 @@
     }).addTo(map);
   }
 
-  function zoomToFitPrecinct(id) {
+  // onDone (optional) fires once the fly-to-precinct animation has truly
+  // settled. Listeners are bound BEFORE flyToBounds is called (so there's no
+  // race if the animation somehow resolves synchronously). A single
+  // flyToBounds call can, in practice, fire more than one movestart/moveend
+  // burst before the view is really done settling (observed directly: a
+  // short ~150ms burst followed by a gap, then the "real" ~500ms flight) --
+  // trusting the very first moveend reopens the exact bug this is fixing,
+  // just shifted slightly later. So instead of watching moveend, this
+  // watches the continuous "move"/"zoom" progress events fired throughout
+  // *any* animation and waits for a short quiet period (no further activity)
+  // before considering the flight over -- robust to however many bursts
+  // Leaflet's internals end up producing, and to a slow/loaded browser
+  // stretching the animation well past its nominal duration. A short timeout
+  // only catches the case where flyToBounds decides there's nothing to move
+  // at all (already exactly in view, so no move/zoom events ever fire); a
+  // generous absolute failsafe still guarantees onDone is never stuck
+  // forever in some unexpected edge case.
+  function zoomToFitPrecinct(id, onDone) {
     var p = precinctIndex[id];
-    if (!p) return;
+    if (!p) { if (onDone) onDone(); return; }
+    var done = false;
+    var sawActivity = false;
+    var settleTimer = null;
+    var QUIET_MS = 150;
+    function finish() {
+      if (done) return;
+      done = true;
+      map.off("move", onActivity);
+      map.off("zoom", onActivity);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (onDone) onDone();
+    }
+    function onActivity() {
+      sawActivity = true;
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(finish, QUIET_MS);
+    }
+    if (onDone) {
+      map.on("move", onActivity);
+      map.on("zoom", onActivity);
+      setTimeout(function () { if (!sawActivity) finish(); }, 250);
+      setTimeout(finish, 5000);
+    }
     try {
       map.flyToBounds(p.layer.getBounds(), { padding: [40, 40], duration: 0.5, maxZoom: 19 });
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      finish();
+    }
   }
 
   // ================== PRECINCT LIST ==================
@@ -2078,7 +2138,12 @@
 
   // ================== PRECINCT PANEL ==================
   function openPrecinctPanel(id) {
-    if (openPrecinctId && openPrecinctId !== id) closePrecinctPanel(true, { keepSelectionState: true });
+    // Closing a different, previously-open precinct's panel now happens
+    // synchronously in selectPrecinct(), immediately on click -- not here --
+    // since this function itself is deferred until the fly-to-precinct
+    // animation finishes (see zoomToFitPrecinct's onDone callback) and
+    // leaving that close-check here would leave the stale panel on screen
+    // for the whole flight instead.
     openPrecinctId = id;
     pendingWalked = {};
     walkArmed = false;
