@@ -154,6 +154,26 @@
   main.layout.with-banner { height: calc(100% - 52px - 24px); }
 
   #map { flex: 1; height: 100%; background: var(--paper); }
+
+  /* Off by default -- turned on from Settings (see the "Show zoom level"
+     checkbox) for reporting back exactly what zoom a map issue happened at,
+     without having to guess or dig it out of devtools. */
+  #zoom-level-indicator {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 450;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 9px;
+    font-size: 0.76rem;
+    font-family: "IBM Plex Mono", monospace;
+    box-shadow: var(--shadow);
+    pointer-events: none;
+  }
+  #zoom-level-indicator[hidden] { display: none; }
   #map.walk-armed { cursor: crosshair; touch-action: none; }
   /* Leaflet adds its own "leaflet-interactive" class (cursor: pointer) to
      whichever canvas/path is under the mouse while hovering an interactive
@@ -468,6 +488,20 @@
   .walk-toggle-row input[type="checkbox"] { accent-color: var(--select); width: 16px; height: 16px; }
   .walk-hint { margin: 6px 0 0; font-size: 0.76rem; color: var(--muted); }
 
+  .precinct-notes-textarea {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 56px;
+  }
+  .precinct-notes-textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
   #precinct-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
 
   .dialog-actions {
@@ -601,6 +635,17 @@
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  .settings-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    color: var(--ink);
+    padding: 8px 0 2px;
+    cursor: pointer;
+  }
+  .settings-checkbox-row input[type="checkbox"] { accent-color: var(--select); width: 15px; height: 15px; }
+  .settings-hint { margin: 4px 0 0; font-size: 0.74rem; color: var(--muted); line-height: 1.4; }
   #settings-status { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
 
   /* ---------- login screen ---------- */
@@ -714,6 +759,7 @@
 
 <main class="layout" id="main-layout">
   <div id="map"></div>
+  <div id="zoom-level-indicator" hidden></div>
   <aside class="sidebar">
     <div class="sidebar-section">
       <div class="sidebar-header">
@@ -775,6 +821,11 @@
       <p class="walk-hint">Swipe over parcels to mark walked.</p>
     </div>
 
+    <div class="precinct-panel-section">
+      <label class="field-label" for="precinct-notes">Precinct Notes</label>
+      <textarea id="precinct-notes" class="precinct-notes-textarea" rows="3" placeholder="Anything canvassers should know about this precinct&hellip;"></textarea>
+    </div>
+
     <div id="precinct-meta"></div>
     <div class="dialog-actions">
       <button class="btn" id="precinct-cancel" type="button">Cancel</button>
@@ -801,6 +852,11 @@
     <div class="settings-section">
       <span class="field-label">Interface</span>
       <div class="settings-color-row"><span>Section heading tint</span><input type="color" id="settings-color-header-tint"></div>
+      <label class="settings-checkbox-row">
+        <input type="checkbox" id="settings-show-zoom-level">
+        <span>Show zoom level on map</span>
+      </label>
+      <p class="settings-hint">Adds a small live readout over the bottom-left of the map -- handy for reporting exactly what zoom level something happened at. This is a per-device display preference, not shared with other canvassers and not affected by Reset/Save below.</p>
     </div>
 
     <div class="settings-section">
@@ -883,7 +939,7 @@
   var parcelIndex = {};
   // precinctId(string) -> { feature, layer, parcelKeys: [address keys...] }
   var precinctIndex = {};
-  var precinctStatusData = {};   // precinctId -> { status, completedDate, updatedAt, updatedBy }
+  var precinctStatusData = {};   // precinctId -> { status, completedDate, notes, updatedAt, updatedBy }
   var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
   var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
   var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
@@ -892,6 +948,16 @@
   var currentUser = null;      // { username, displayName }
   var locateWatchId = null;
   var locationMarker = null, accuracyCircle = null;
+
+  // ---- zoom-level readout (Settings > Interface > "Show zoom level") ----
+  // A per-device display preference, not part of DEFAULT_SETTINGS/currentSettings
+  // -- it's for reporting a zoom-specific issue back to a developer, not
+  // something that should suddenly appear on every other canvasser's screen
+  // just because one person turned it on, so it lives in localStorage
+  // instead of the shared Settings sheet.
+  var SHOW_ZOOM_LEVEL_KEY = "a4m_showZoomLevel";
+  var showZoomLevel = false;
+  try { showZoomLevel = localStorage.getItem(SHOW_ZOOM_LEVEL_KEY) === "1"; } catch (e) { /* ignore (private browsing, etc.) */ }
 
   // ---- precinct panel state ----
   var openPrecinctId = null;      // precinct whose floating panel is currently open
@@ -1208,6 +1274,10 @@
     map.on("zoomend", updateVisibleParcels);
     map.on("moveend", updateVisibleParcels);
     map.on("zoomend", updatePrecinctLabelsVisibility);
+    // "zoom" (not just "zoomend") so the readout keeps up live during a
+    // pinch/scroll or an animated flyTo/flyToBounds, not just once it settles.
+    map.on("zoom zoomend", updateZoomLevelIndicator);
+    applyShowZoomLevel();
     setupSwipeToWalk();
 
     Promise.all([
@@ -1225,7 +1295,7 @@
 
       if (stateRes && stateRes.ok) {
         (stateRes.precincts || []).forEach(function (p) {
-          precinctStatusData[String(p.precinctId)] = { status: p.status, completedDate: p.completedDate, updatedAt: p.updatedAt, updatedBy: p.updatedBy };
+          precinctStatusData[String(p.precinctId)] = { status: p.status, completedDate: p.completedDate, notes: p.notes || "", updatedAt: p.updatedAt, updatedBy: p.updatedBy };
         });
         (stateRes.parcels || []).forEach(function (pc) {
           parcelWalkedData[keyFor(pc.address)] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
@@ -1290,7 +1360,7 @@
         // Also hold back the sync watermark so it's retried on a later poll
         // once the panel is closed, instead of being skipped forever.
         if (openPrecinctId === id) { anySkipped = true; return; }
-        precinctStatusData[id] = { status: p.status, completedDate: p.completedDate, updatedAt: p.updatedAt, updatedBy: p.updatedBy };
+        precinctStatusData[id] = { status: p.status, completedDate: p.completedDate, notes: p.notes || "", updatedAt: p.updatedAt, updatedBy: p.updatedBy };
         restylePrecinct(id);
         touchedAny = true;
       });
@@ -1394,6 +1464,17 @@
   function removeNumberLabel(entry) {
     if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
     entry.labelCompact = null;
+  }
+
+  // ================== ZOOM LEVEL READOUT ==================
+  function applyShowZoomLevel() {
+    $("zoom-level-indicator").hidden = !showZoomLevel;
+    if (showZoomLevel) updateZoomLevelIndicator();
+  }
+
+  function updateZoomLevelIndicator() {
+    if (!showZoomLevel || !map) return;
+    $("zoom-level-indicator").textContent = "Zoom " + map.getZoom().toFixed(2);
   }
 
   // ================== MY LOCATION ==================
@@ -2008,6 +2089,10 @@
     pendingStatus = (existing && existing.status) || DEFAULT_PRECINCT_STATUS;
     pendingCompletedDate = (existing && existing.completedDate) || "";
     $("precinct-completed-date").value = pendingCompletedDate;
+    // Notes don't affect the map, so -- like completedDate above -- there's
+    // no need for a dedicated pending* variable: the textarea's own value is
+    // read directly by the Save handler below.
+    $("precinct-notes").value = (existing && existing.notes) || "";
     $("precinct-meta").textContent = existing && existing.updatedAt ? lastUpdatedText(existing) : "";
 
     updatePrecinctPanelTitle(id);
@@ -2182,6 +2267,7 @@
     var id = openPrecinctId;
     var status = pendingStatus;
     var completedDate = status === "Completed" ? $("precinct-completed-date").value : "";
+    var notes = $("precinct-notes").value.trim();
     var walkedChanges = Object.keys(pendingWalked).map(function (key) {
       return { key: key, address: parcelIndex[key].addressExact, walked: pendingWalked[key] };
     });
@@ -2192,7 +2278,7 @@
     try {
       var nowIso = new Date().toISOString();
       if (DEMO_MODE) {
-        precinctStatusData[id] = { status: status, completedDate: completedDate, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        precinctStatusData[id] = { status: status, completedDate: completedDate, notes: notes, updatedAt: nowIso, updatedBy: currentUser.displayName };
         walkedChanges.forEach(function (c) {
           parcelWalkedData[c.key] = { walked: c.walked, updatedAt: nowIso, updatedBy: currentUser.displayName };
         });
@@ -2202,11 +2288,12 @@
           precinctId: id,
           status: status,
           completedDate: completedDate,
+          notes: notes,
           walked: walkedChanges.map(function (c) { return { address: c.address, walked: c.walked }; }),
           username: currentUser.username
         });
         if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
-        precinctStatusData[id] = { status: status, completedDate: completedDate, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        precinctStatusData[id] = { status: status, completedDate: completedDate, notes: notes, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
         walkedChanges.forEach(function (c) {
           parcelWalkedData[c.key] = { walked: c.walked, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
         });
@@ -2313,6 +2400,10 @@
   function openSettingsPanel() {
     draftSettings = cloneSettings(currentSettings);
     populateSettingsForm(draftSettings);
+    // Not part of draftSettings (see the SHOW_ZOOM_LEVEL_KEY comment above)
+    // -- synced into the form here instead, and takes effect immediately
+    // rather than waiting on Save/Reset.
+    $("settings-show-zoom-level").checked = showZoomLevel;
     $("settings-status").textContent = "";
     $("settings-panel").hidden = false;
   }
@@ -2350,6 +2441,15 @@
   $("settings-basemap").addEventListener("change", function () {
     draftSettings.basemap = this.value;
     applySettings(draftSettings);
+  });
+
+  // Local-only preference (see SHOW_ZOOM_LEVEL_KEY above) -- takes effect
+  // immediately and persists to localStorage right away, unlike the rest of
+  // this panel which previews into draftSettings and waits for Save.
+  $("settings-show-zoom-level").addEventListener("change", function () {
+    showZoomLevel = this.checked;
+    try { localStorage.setItem(SHOW_ZOOM_LEVEL_KEY, showZoomLevel ? "1" : "0"); } catch (e) { /* ignore */ }
+    applyShowZoomLevel();
   });
 
   $("settings-precinct-fill-opacity").addEventListener("input", function () {
