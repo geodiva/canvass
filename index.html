@@ -1272,6 +1272,14 @@
     addLocateControl();
 
     map.on("click", function () { deselectParcel(); });
+    // Address (parcel number) labels are plain DOM markers, not part of the
+    // vector layer Leaflet already smoothly scales/repositions during a zoom
+    // animation -- left alone, they'd sit at their old screen position and
+    // visibly swim/jump once the zoom lands. Hiding them the instant a zoom
+    // starts, then letting the existing zoomend pass (updateVisibleParcels)
+    // re-add them at their correct positions/sizes once it settles, avoids
+    // that jump entirely.
+    map.on("zoomstart", hideAddressLabelsForZoom);
     map.on("zoomend", updateVisibleParcels);
     map.on("moveend", updateVisibleParcels);
     map.on("zoomend", updatePrecinctLabelsVisibility);
@@ -1469,6 +1477,18 @@
   function removeNumberLabel(entry) {
     if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
     entry.labelCompact = null;
+  }
+
+  // Instantly clears every currently-shown address (parcel number) label at
+  // the start of a zoom -- see the "zoomstart" handler above for why. Only
+  // touches labels, not the parcel polygons themselves (those animate fine
+  // as part of the vector layer). The upcoming zoomend's updateVisibleParcels
+  // pass puts the correct labels back once the new zoom has settled.
+  function hideAddressLabelsForZoom() {
+    Object.keys(parcelIndex).forEach(function (key) {
+      var entry = parcelIndex[key];
+      if (entry.labelMarker) removeNumberLabel(entry);
+    });
   }
 
   // ================== ZOOM LEVEL READOUT ==================
