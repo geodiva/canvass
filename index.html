@@ -464,6 +464,9 @@
   .precinct-status-btn[data-status="Partially Walked"] .swatch { background: var(--precinct-partially-walked); }
   .precinct-status-btn[data-status="Completed"] .swatch { background: var(--precinct-completed); }
   .precinct-status-btn.active { font-weight: 600; border-color: var(--select); background: color-mix(in srgb, var(--select) 10%, var(--paper)); }
+  .precinct-status-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .walk-toggle-row input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.6; }
+  .precinct-notes-textarea:read-only { background: var(--paper); opacity: 0.75; cursor: default; }
 
   #precinct-completed-date-field { margin-top: 10px; }
   #precinct-completed-date {
@@ -818,7 +821,7 @@
         <span class="swatch"></span>
         <span>Walked</span>
       </label>
-      <p class="walk-hint">Swipe over parcels to mark walked.</p>
+      <p class="walk-hint" id="walk-hint-text">Swipe over parcels to mark walked.</p>
     </div>
 
     <div class="precinct-panel-section">
@@ -928,6 +931,12 @@
 
   var DEMO_MODE = !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0;
   var demoUsers = {};     // username(lowercased) -> {password, displayName}                 (demo mode only)
+  // Demo-mode-only role assignments (no real Users sheet to read from here).
+  // Against the real Apps Script backend, role comes back from the "login"
+  // response instead (see apps-script/Code.gs's Users sheet Role column).
+  // Any demo username not listed here defaults to "editor", same as the
+  // real backend defaults a user with a blank Role column to "editor".
+  var DEMO_ROLES = { chuck: "editor", rachel: "editor", test: "viewer" };
 
   // ================== STATE ==================
   var map, boundaryLayer, parcelsLayer, precinctsLayer;
@@ -946,7 +955,15 @@
   var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
   var selectedAddressKey = null;
   var selectedPrecinctId = null;
-  var currentUser = null;      // { username, displayName }
+  var currentUser = null;      // { username, displayName, role } -- role is "editor" or "viewer"
+
+  // A viewer can open and look at the precinct panel, but can't set status,
+  // mark parcels walked, write notes, or touch the Map Settings panel.
+  // Defaults to "editor" if role is somehow missing (e.g. an existing Users
+  // row with a blank Role column) -- matches the backend's own default, so
+  // an admin who hasn't set roles yet doesn't suddenly find themselves
+  // locked out.
+  function isEditor() { return !currentUser || currentUser.role !== "viewer"; }
   var locateWatchId = null;
   var locationMarker = null, accuracyCircle = null;
 
@@ -1164,7 +1181,8 @@
     submitBtn.textContent = "Signing in\u2026";
     try {
       if (DEMO_MODE) {
-        currentUser = { username: username, displayName: username };
+        var demoRole = DEMO_ROLES[username.toLowerCase()] || "editor";
+        currentUser = { username: username, displayName: username, role: demoRole };
       } else {
         var hash = await sha256Hex(password);
         var res = await apiPost({ action: "login", username: username, passwordHash: hash });
@@ -1174,7 +1192,7 @@
           submitBtn.textContent = "Log in";
           return;
         }
-        currentUser = { username: username, displayName: res.displayName || username };
+        currentUser = { username: username, displayName: res.displayName || username, role: res.role || "editor" };
       }
       sessionStorage.setItem("a4m_user", JSON.stringify(currentUser));
       enterApp();
@@ -1196,6 +1214,9 @@
     $("user-chip-name").textContent = currentUser.displayName || currentUser.username;
     if (DEMO_MODE) $("demo-banner").classList.add("show");
     $("main-layout").classList.toggle("with-banner", DEMO_MODE);
+    // A viewer never gets the Map Settings panel at all -- hide the gear
+    // icon that opens it entirely, not just what's inside it.
+    $("settings-toggle-btn").hidden = !isEditor();
     if (!map) {
       $("loading-overlay").classList.add("show");
       initMap();
@@ -2055,7 +2076,25 @@
   // a no-op if this isn't the currently-open precinct.
   function updatePrecinctPanelTitle(id) {
     if (id !== openPrecinctId) return;
-    $("precinct-panel-title").textContent = "Precinct " + id + " — " + precinctProgressText(id);
+    $("precinct-panel-title").textContent = "Precinct " + id + " — " + precinctProgressText(id) +
+      (isEditor() ? "" : " (view only)");
+  }
+
+  // A viewer can still open a precinct's panel to see its status, walked
+  // progress, and notes -- just can't change any of it. Applied every time
+  // the panel opens (rather than once at login) so it's always in sync with
+  // whatever's currently in the DOM.
+  function applyPrecinctPanelRoleGating() {
+    var editor = isEditor();
+    document.querySelectorAll(".precinct-status-btn").forEach(function (btn) { btn.disabled = !editor; });
+    $("precinct-walk-toggle").disabled = !editor;
+    $("precinct-completed-date").disabled = !editor;
+    $("precinct-notes").readOnly = !editor;
+    $("precinct-save").hidden = !editor;
+    $("precinct-cancel").textContent = editor ? "Cancel" : "Close";
+    $("walk-hint-text").textContent = editor
+      ? "Swipe over parcels to mark walked."
+      : "Viewers can look, but can't mark parcels walked.";
   }
 
   function highlightPrecinctListItem(id) {
@@ -2216,6 +2255,7 @@
 
     updatePrecinctPanelTitle(id);
     updatePrecinctStatusButtons();
+    applyPrecinctPanelRoleGating();
     $("precinct-panel").hidden = false;
     positionPrecinctPanel(id);
     map.on("moveend zoomend", repositionOpenPanel);
@@ -2355,6 +2395,10 @@
 
   document.querySelectorAll(".precinct-status-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
+      // Defense in depth -- the button is already disabled for a viewer
+      // (see applyPrecinctPanelRoleGating()), which normally blocks the
+      // click from firing at all.
+      if (!isEditor()) return;
       pendingStatus = btn.dataset.status;
       updatePrecinctStatusButtons();
       // Preview the chosen status immediately -- on the map, in its list
@@ -2374,6 +2418,9 @@
   });
 
   $("precinct-walk-toggle").addEventListener("change", function () {
+    // Defense in depth -- the checkbox is already disabled for a viewer
+    // (see applyPrecinctPanelRoleGating()).
+    if (!isEditor()) { this.checked = false; return; }
     walkArmed = this.checked;
     setWalkArmed(walkArmed);
   });
@@ -2403,6 +2450,11 @@
   $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true, { zoomOut: true }); });
 
   $("precinct-save").addEventListener("click", async function () {
+    // Defense in depth -- the Save button is hidden entirely for a viewer
+    // (see applyPrecinctPanelRoleGating()), and the real backend also
+    // rejects a save from a viewer's username regardless of what the client
+    // sends (see handleSaveState() in apps-script/Code.gs).
+    if (!isEditor()) return;
     if (!openPrecinctId) return;
     var id = openPrecinctId;
     var status = pendingStatus;
@@ -2538,6 +2590,10 @@
   }
 
   function openSettingsPanel() {
+    // Defense in depth -- the gear icon that calls this is already hidden
+    // for a viewer (see enterApp()), but never let the panel itself open
+    // for one regardless of how this got called.
+    if (!isEditor()) return;
     draftSettings = cloneSettings(currentSettings);
     populateSettingsForm(draftSettings);
     // Not part of draftSettings (see the SHOW_ZOOM_LEVEL_KEY comment above)
