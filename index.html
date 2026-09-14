@@ -1583,10 +1583,44 @@
     // they are. The crisp boundary line itself is a separate layer (see
     // addBoundaryOutline below) added *after* precincts/parcels so it stays
     // visible on top instead of getting drawn over by them.
-    boundaryLayer = L.geoJSON(mask, {
-      interactive: false,
-      style: { stroke: false, fillColor: "#08101a", fillOpacity: 0.3 }
-    }).addTo(map);
+    var dimStyle = { stroke: false, fillColor: "#08101a", fillOpacity: 0.3 };
+    boundaryLayer = L.geoJSON(mask, { interactive: false, style: dimStyle }).addTo(map);
+
+    // turf.mask() only ever subtracts each polygon's OUTER ring from the
+    // world -- any interior holes in the boundary (enclaves that aren't
+    // really part of the canvassing area, or small gaps between adjacent
+    // precinct shapes) come back through untouched and never get dimmed on
+    // their own, even though they're just as "not in the city" as the area
+    // outside the boundary entirely. Add each hole as its own small dimmed
+    // polygon so it gets the same shading.
+    var enclaves = extractInteriorRings(boundaryGeoJson);
+    if (enclaves.length) {
+      L.geoJSON({ type: "FeatureCollection", features: enclaves }, {
+        interactive: false,
+        style: dimStyle
+      }).addTo(map);
+    }
+  }
+
+  // Pulls every interior ring (hole) out of a boundary GeoJSON's Polygon(s)/
+  // MultiPolygon(s), each as its own standalone Polygon feature -- see the
+  // turf.mask() limitation noted in addBoundaryDimming above.
+  function extractInteriorRings(geojson) {
+    var rings = [];
+    function fromPolygonCoords(coords) {
+      for (var i = 1; i < coords.length; i++) {
+        rings.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords[i]] } });
+      }
+    }
+    function fromGeometry(geom) {
+      if (!geom) return;
+      if (geom.type === "Polygon") fromPolygonCoords(geom.coordinates);
+      else if (geom.type === "MultiPolygon") geom.coordinates.forEach(fromPolygonCoords);
+    }
+    if (geojson.type === "FeatureCollection") geojson.features.forEach(function (f) { fromGeometry(f.geometry); });
+    else if (geojson.type === "Feature") fromGeometry(geojson.geometry);
+    else fromGeometry(geojson);
+    return rings;
   }
 
   // Outlines the actual city boundary. Deliberately added to the map *after*
