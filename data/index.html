@@ -1,0 +1,2616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ami 4 Mayor Canvass Progress Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+
+<style>
+  :root {
+    --paper: #EEF2F4;
+    --panel: #FFFFFF;
+    --ink: #1C2B38;
+    --muted: #5C707C;
+    --border: #D5DEE2;
+    --line: #4A6577;
+    --focus: #2F6F8F;
+    --select: #1257FF;
+    --accent: #E0622B;
+    --accent-ink: #FFFFFF;
+    --danger: #C0392B;
+    --shadow: 0 12px 32px -12px rgba(28,43,56,0.28);
+
+    --parcel-fill: #4A6577;
+    --walked-color: #14181D;
+
+    --precinct-not-printed: #D1493F;
+    --precinct-printed: #E0B23F;
+    --precinct-partially-walked: #3FAE62;
+    --precinct-completed: #8E5FD1;
+
+    /* Overridable at runtime from the Settings panel (see applySettings());
+       these three are what "Save" there persists as the shared default. */
+    --precinct-selected-border: #0047AB;
+    --precinct-label-color: #0047AB;
+    --precinct-unselected-outline: #1A1A1A;
+
+    /* A soft top-to-bottom wash behind the topbar row and each sidebar
+       section's heading (see #topbar and .sidebar-header). This fallback
+       (plain violet, matching DEFAULT_SETTINGS.colors.headerTint) only
+       shows for the instant before JS runs -- applySettings() overwrites it
+       as an inline style with the settings-panel color (default or saved)
+       converted to rgba(), so it's also live-configurable from Settings. */
+    --header-tint: rgba(124, 58, 237, 0.16);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0F1B23;
+      --panel: #16232C;
+      --ink: #E6EDF1;
+      --muted: #8FA3AE;
+      --border: #263640;
+      --line: #7C93A2;
+      --focus: #5FA8C9;
+      --select: #3D8BFF;
+      --accent: #F0793F;
+      --accent-ink: #171008;
+      --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0F1B23;
+    --panel: #16232C;
+    --ink: #E6EDF1;
+    --muted: #8FA3AE;
+    --border: #263640;
+    --line: #7C93A2;
+    --focus: #5FA8C9;
+    --select: #3D8BFF;
+    --accent: #F0793F;
+    --accent-ink: #171008;
+    --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Public Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    overflow: hidden;
+  }
+
+  h1, h2, h3, .brand { font-family: "Archivo", sans-serif; }
+
+  button { font-family: inherit; }
+
+  /* ---------- top bar ---------- */
+  #topbar {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    /* Same header-tint wash as .sidebar-header, layered over the row's
+       normal panel background rather than replacing it. */
+    background: linear-gradient(180deg, var(--header-tint), transparent 85%), var(--panel);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    position: relative;
+    z-index: 20;
+  }
+  #topbar .brand {
+    font-weight: 800;
+    font-size: 1.02rem;
+    letter-spacing: 0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #topbar .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  #user-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+  #user-chip strong { color: var(--ink); }
+  #logout-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 7px;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  #logout-btn:hover { background: var(--paper); color: var(--ink); }
+
+  #demo-banner {
+    display: none;
+    background: #F0793F22;
+    color: var(--accent);
+    font-size: 0.76rem;
+    text-align: center;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #demo-banner.show { display: block; }
+
+  /* ---------- layout ---------- */
+  main.layout {
+    height: calc(100% - 52px);
+    display: flex;
+    position: relative;
+  }
+  main.layout.with-banner { height: calc(100% - 52px - 24px); }
+
+  #map { flex: 1; height: 100%; background: var(--paper); }
+
+  /* Off by default -- turned on from Settings (see the "Show zoom level"
+     checkbox) for reporting back exactly what zoom a map issue happened at,
+     without having to guess or dig it out of devtools. */
+  #zoom-level-indicator {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 450;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 9px;
+    font-size: 0.76rem;
+    font-family: "IBM Plex Mono", monospace;
+    box-shadow: var(--shadow);
+    pointer-events: none;
+  }
+  #zoom-level-indicator[hidden] { display: none; }
+  #map.walk-armed { cursor: crosshair; touch-action: none; }
+  /* Leaflet adds its own "leaflet-interactive" class (cursor: pointer) to
+     whichever canvas/path is under the mouse while hovering an interactive
+     parcel or precinct shape -- which is most of the map -- and that would
+     otherwise beat the crosshair above. */
+  #map.walk-armed .leaflet-interactive { cursor: crosshair !important; }
+
+  /* Kills the faint moving grid of hairline seams between adjacent map
+     tiles that shows up mainly on mobile Safari/retina screens, worse when
+     several tile layers are stacked (our Hybrid basemap is three). The
+     seams come from the browser's sub-pixel rounding of each tile's
+     position while panning/zooming; a transparent outline forces it to
+     pixel-snap instead of anti-alias the edge. Purely cosmetic, standard
+     Leaflet workaround. */
+  .leaflet-tile { outline: 1px solid transparent; }
+
+  /* ---------- loading overlay ---------- */
+  #loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: color-mix(in srgb, var(--paper) 85%, transparent);
+    z-index: 500;
+    pointer-events: none;
+  }
+  #loading-overlay.show { display: flex; }
+  #loading-overlay .spinner {
+    width: 34px;
+    height: 34px;
+    border: 3px solid var(--border);
+    border-top-color: var(--select);
+    border-radius: 50%;
+    animation: a4m-spin 0.8s linear infinite;
+  }
+  #loading-overlay .loading-text { font-size: 0.85rem; color: var(--muted); }
+  @keyframes a4m-spin { to { transform: rotate(360deg); } }
+
+  aside.sidebar {
+    width: 340px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+
+  /* Precinct list (top half) and Address list (bottom half) share the
+     sidebar, each independently scrollable. */
+  .sidebar-section {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .sidebar-header {
+    padding: 12px 14px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    /* A vertical tint sitting behind the heading label -- fades to fully
+       transparent well before the bottom of the header so it reads as a
+       backdrop for the title, not a solid banner. Anything below it (like
+       the search boxes) already has its own opaque background and simply
+       sits on top. */
+    background: linear-gradient(180deg, var(--header-tint), transparent 85%);
+  }
+  .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
+
+  .sidebar-search-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .sidebar-search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  /* flex: 0 0 auto (not flex: 1) is deliberate: these lists no longer grow
+     to fill their .sidebar-section -- they're capped to about 5 visible
+     rows (max-height set from JS in applyListHeightCaps(), which measures
+     an actual rendered row rather than guessing a font-dependent px value)
+     and scroll internally for the rest. Since .sidebar-section itself keeps
+     flex: 1 1 0 (three equal-height sections), whatever height a capped
+     list doesn't use is left as breathing room in that section instead of
+     one long list swallowing the whole sidebar. */
+  #precinct-list, #address-list {
+    flex: 0 0 auto;
+    overflow-y: auto;
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+    min-height: 0;
+  }
+  #precinct-list li, #address-list li {
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  #precinct-list li:hover, #address-list li:hover { background: var(--paper); }
+  #precinct-list li.active, #address-list li.active {
+    background: var(--select);
+    color: #fff;
+    font-weight: 600;
+  }
+  #precinct-list .empty-msg, #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .precinct-id { font-family: "IBM Plex Mono", monospace; font-size: 0.82rem; }
+  .precinct-progress { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #precinct-list li.active .precinct-progress { color: #fff; opacity: 0.85; }
+
+  .sidebar-footer {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .status-legend {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    flex-shrink: 0;
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--ink);
+  }
+  .legend-swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .legend-label { flex: 1; }
+  .legend-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* ---------- base layer switcher ---------- */
+  .leaflet-control-layers {
+    border-radius: 8px !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: var(--shadow) !important;
+    background: var(--panel) !important;
+    color: var(--ink);
+    font-family: "Public Sans", sans-serif;
+  }
+  .leaflet-control-layers-toggle { border-radius: 8px; }
+  .leaflet-control-layers-expanded { padding: 8px 10px; font-size: 0.85rem; }
+  .leaflet-control-layers-selector { accent-color: var(--select); margin-right: 6px; }
+
+  /* ---------- my-location control ---------- */
+  .locate-control-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .locate-control-link:hover { background: var(--paper); }
+  .locate-control-link.active { color: var(--select); }
+  .user-location-marker { background: transparent; border: none; }
+  .user-location-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #1257FF;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 2px rgba(18,87,255,0.35), 0 1px 4px rgba(0,0,0,0.35);
+  }
+
+  /* ---------- parcel house-number labels ---------- */
+  .parcel-number-label { background: transparent; border: none; }
+  .parcel-number-label span {
+    transform: translate(-50%, -50%);
+    position: relative;
+    display: inline-block;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  /* Shown for a selected precinct's parcels at whatever (often lower) zoom
+     zoomToFitPrecinct settles on -- each lot is smaller on screen there
+     than a normal LABELS_MIN_ZOOM view, so the label needs to shrink to
+     match instead of overwhelming it. */
+  .parcel-number-label.compact span {
+    font-size: 9px;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.85);
+  }
+
+  /* ---------- precinct number labels ---------- */
+  .precinct-number-label { background: transparent; border: none; }
+  .precinct-number-label span {
+    transform: translate(-50%, -50%);
+    position: relative;
+    display: inline-block;
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--precinct-label-color);
+    /* A light halo (rather than a dark one) is what keeps a cobalt-blue
+       label readable over dark satellite/hybrid imagery as well as the
+       light Streets basemap. */
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* ---------- selected precinct glow ---------- */
+  /* A separate SVG-rendered outline-only layer (see updateSelectedPrecinctHighlight)
+     drawn just for the currently-selected precinct -- the shared Canvas
+     renderer used for the other 68 precincts/11k+ parcels can't take CSS
+     filters, but a lone SVG path can. */
+  .precinct-selected-highlight {
+    filter: drop-shadow(0 0 3px var(--precinct-selected-border)) drop-shadow(0 0 7px var(--precinct-selected-border));
+    pointer-events: none;
+  }
+
+  /* ---------- floating precinct panel ---------- */
+  .precinct-panel {
+    position: absolute;
+    width: 300px;
+    max-width: calc(100vw - 32px);
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 16px 16px 14px;
+    z-index: 900;
+  }
+  .precinct-panel[hidden] { display: none; }
+  .precinct-panel h3 { margin: 0 0 2px; font-size: 0.98rem; }
+  .precinct-panel .field-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 6px;
+  }
+  .precinct-panel-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .precinct-panel-section:first-of-type { border-top: none; padding-top: 0; }
+
+  .precinct-status-row { display: flex; flex-direction: column; gap: 6px; }
+  .precinct-status-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+    background: var(--paper);
+    color: var(--ink);
+    text-align: left;
+  }
+  .precinct-status-btn .swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+  .precinct-status-btn[data-status="Not Yet Printed"] .swatch { background: var(--precinct-not-printed); }
+  .precinct-status-btn[data-status="Printed"] .swatch { background: var(--precinct-printed); }
+  .precinct-status-btn[data-status="Partially Walked"] .swatch { background: var(--precinct-partially-walked); }
+  .precinct-status-btn[data-status="Completed"] .swatch { background: var(--precinct-completed); }
+  .precinct-status-btn.active { font-weight: 600; border-color: var(--select); background: color-mix(in srgb, var(--select) 10%, var(--paper)); }
+
+  #precinct-completed-date-field { margin-top: 10px; }
+  #precinct-completed-date {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+
+  .walk-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .walk-toggle-row .swatch { width: 11px; height: 11px; border-radius: 3px; background: var(--walked-color); flex-shrink: 0; }
+  .walk-toggle-row input[type="checkbox"] { accent-color: var(--select); width: 16px; height: 16px; }
+  .walk-hint { margin: 6px 0 0; font-size: 0.76rem; color: var(--muted); }
+
+  .precinct-notes-textarea {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 56px;
+  }
+  .precinct-notes-textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+  #precinct-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
+  .dialog-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .btn {
+    flex: 1;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+  }
+  .btn:hover { filter: brightness(0.97); }
+  .btn.primary { background: var(--select); border-color: var(--select); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+
+  /* ---------- settings toggle (gear) button ---------- */
+  #settings-toggle-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 0.95rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #settings-toggle-btn:hover { background: var(--paper); color: var(--ink); }
+
+  /* ---------- settings panel (hideable; colors + default basemap) ---------- */
+  .settings-panel {
+    position: fixed;
+    top: 62px;
+    right: 14px;
+    width: 300px;
+    max-width: calc(100vw - 28px);
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background: var(--panel);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 14px 16px 16px;
+    z-index: 950;
+  }
+  .settings-panel[hidden] { display: none; }
+  .settings-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .settings-panel-header h3 { margin: 0; font-size: 0.95rem; }
+  #settings-close {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  #settings-close:hover { color: var(--ink); }
+  .settings-section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .settings-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .settings-section .field-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+  }
+  #settings-basemap {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-family: inherit;
+  }
+  .settings-color-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--ink);
+    padding: 5px 0;
+  }
+  .settings-color-row input[type="color"] {
+    width: 34px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+  }
+  .settings-slider-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.82rem;
+    color: var(--ink);
+    padding: 8px 0 5px;
+  }
+  .settings-slider-row input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0 8px;
+    accent-color: var(--precinct-selected-border, #0047AB);
+  }
+  .settings-slider-row .settings-slider-value {
+    flex: 0 0 auto;
+    width: 3.2em;
+    text-align: right;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .settings-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82rem;
+    color: var(--ink);
+    padding: 8px 0 2px;
+    cursor: pointer;
+  }
+  .settings-checkbox-row input[type="checkbox"] { accent-color: var(--select); width: 15px; height: 15px; }
+  .settings-hint { margin: 4px 0 0; font-size: 0.74rem; color: var(--muted); line-height: 1.4; }
+  #settings-status { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
+  /* ---------- login screen ---------- */
+  #login-overlay {
+    position: fixed; inset: 0;
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+  #login-overlay.hide { display: none; }
+  #login-card {
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    background: var(--panel);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 26px 24px 22px;
+  }
+  #login-card .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.05rem;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  #login-card .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  #login-card p.sub { color: var(--muted); font-size: 0.8rem; margin: 0 0 18px; }
+  #login-card .field { margin-bottom: 12px; }
+  #login-card label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+  #login-card input {
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+  #login-error {
+    color: var(--danger);
+    font-size: 0.78rem;
+    min-height: 1.2em;
+    margin: 4px 0 10px;
+  }
+  #login-card .btn.primary { width: 100%; flex: none; padding: 10px; }
+  #login-card .config-note {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
+  /* Phone, portrait: stack map above list, but keep the map small so the
+     lists (the thing people are actually scrolling and tapping) get most
+     of the screen. */
+  @media (max-width: 760px) and (orientation: portrait) {
+    main.layout { flex-direction: column; }
+    aside.sidebar { width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
+    #map { flex: 0 0 auto; height: 50vh; }
+  }
+
+  /* Phone, landscape: keep the side-by-side layout (map left, panel right)
+     instead of stacking -- just trim the panel width for short screens. */
+  @media (max-height: 500px) and (orientation: landscape) {
+    aside.sidebar { width: 260px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-overlay">
+  <div id="login-card">
+    <div class="brand"><span class="dot"></span>Ami 4 Mayor</div>
+    <p class="sub">Canvassing App &mdash; sign in to continue</p>
+    <form id="login-form">
+      <div class="field">
+        <label for="login-username">Username</label>
+        <input id="login-username" name="username" type="text" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div id="login-error"></div>
+      <button type="submit" class="btn primary" id="login-submit">Log in</button>
+    </form>
+    <div class="config-note" id="login-config-note"></div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="topbar">
+  <div class="brand"><span class="dot"></span>Ami 4 Mayor Canvass Progress Map</div>
+  <div id="user-chip">
+    <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
+    <button id="settings-toggle-btn" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
+    <button id="logout-btn" type="button">Log out</button>
+  </div>
+</div>
+<div id="demo-banner">Demo mode &mdash; not connected to a Google Sheet yet. See README to wire up the Apps Script backend. Saves are kept only in this browser.</div>
+
+<main class="layout" id="main-layout">
+  <div id="map"></div>
+  <div id="zoom-level-indicator" hidden></div>
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>Canvassing progress</h2>
+      </div>
+      <div class="status-legend" id="precinct-legend">
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-not-printed)"></span><span class="legend-label">Not Yet Printed</span><span class="legend-count" id="legend-count-not-printed">0</span></div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-printed)"></span><span class="legend-label">Printed</span><span class="legend-count" id="legend-count-printed">0</span></div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-partially-walked)"></span><span class="legend-label">Partially Walked</span><span class="legend-count" id="legend-count-partially-walked">0</span></div>
+        <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-completed)"></span><span class="legend-label">Completed</span><span class="legend-count" id="legend-count-completed">0</span></div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>Precincts</h2>
+        <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
+      </div>
+      <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-header">
+        <h2>Address</h2>
+        <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+      </div>
+      <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
+      <div class="sidebar-footer" id="count-footer">&nbsp;</div>
+    </div>
+  </aside>
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading map data&hellip;</div>
+  </div>
+
+  <!-- ============ PRECINCT PANEL (floating, tracks the selected precinct) ============ -->
+  <div class="precinct-panel" id="precinct-panel" hidden>
+    <h3 id="precinct-panel-title">Precinct</h3>
+
+    <div class="precinct-panel-section">
+      <span class="field-label">Precinct Status</span>
+      <div class="precinct-status-row" id="precinct-status-group">
+        <button type="button" class="precinct-status-btn" data-status="Not Yet Printed"><span class="swatch"></span>Not Yet Printed</button>
+        <button type="button" class="precinct-status-btn" data-status="Printed"><span class="swatch"></span>Printed</button>
+        <button type="button" class="precinct-status-btn" data-status="Partially Walked"><span class="swatch"></span>Partially Walked</button>
+        <button type="button" class="precinct-status-btn" data-status="Completed"><span class="swatch"></span>Completed</button>
+      </div>
+      <div id="precinct-completed-date-field" hidden>
+        <label class="field-label" for="precinct-completed-date">Completed date</label>
+        <input type="date" id="precinct-completed-date">
+      </div>
+    </div>
+
+    <div class="precinct-panel-section">
+      <span class="field-label">Canvass Status</span>
+      <label class="walk-toggle-row">
+        <input type="checkbox" id="precinct-walk-toggle">
+        <span class="swatch"></span>
+        <span>Walked</span>
+      </label>
+      <p class="walk-hint">Swipe over parcels to mark walked.</p>
+    </div>
+
+    <div class="precinct-panel-section">
+      <label class="field-label" for="precinct-notes">Precinct Notes</label>
+      <textarea id="precinct-notes" class="precinct-notes-textarea" rows="3" placeholder="Anything canvassers should know about this precinct&hellip;"></textarea>
+    </div>
+
+    <div id="precinct-meta"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="precinct-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="precinct-save" type="button">Save</button>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS PANEL (hideable; colors + default basemap) ============ -->
+  <div class="settings-panel" id="settings-panel" hidden>
+    <div class="settings-panel-header">
+      <h3>Map Settings</h3>
+      <button id="settings-close" type="button" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Default Basemap</span>
+      <select id="settings-basemap">
+        <option value="Hybrid">Hybrid</option>
+        <option value="Satellite">Satellite</option>
+        <option value="Streets">Streets</option>
+      </select>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Interface</span>
+      <div class="settings-color-row"><span>Section heading tint</span><input type="color" id="settings-color-header-tint"></div>
+      <label class="settings-checkbox-row">
+        <input type="checkbox" id="settings-show-zoom-level">
+        <span>Show zoom level on map</span>
+      </label>
+      <p class="settings-hint">Adds a small live readout over the bottom-left of the map -- handy for reporting exactly what zoom level something happened at. This is a per-device display preference, not shared with other canvassers and not affected by Reset/Save below.</p>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Precinct Status Colors</span>
+      <div class="settings-color-row"><span>Not Yet Printed</span><input type="color" id="settings-color-not-printed"></div>
+      <div class="settings-color-row"><span>Printed</span><input type="color" id="settings-color-printed"></div>
+      <div class="settings-color-row"><span>Partially Walked</span><input type="color" id="settings-color-partially-walked"></div>
+      <div class="settings-color-row"><span>Completed</span><input type="color" id="settings-color-completed"></div>
+      <div class="settings-slider-row">
+        <span>Fill transparency</span>
+        <input type="range" id="settings-precinct-fill-opacity" min="0" max="1" step="0.01">
+        <span class="settings-slider-value" id="settings-precinct-fill-opacity-value">22%</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Precinct Outlines &amp; Labels</span>
+      <div class="settings-color-row"><span>Selected border / glow</span><input type="color" id="settings-color-selected-border"></div>
+      <div class="settings-color-row"><span>Number label</span><input type="color" id="settings-color-precinct-label"></div>
+      <div class="settings-color-row"><span>Unselected outline</span><input type="color" id="settings-color-unselected-outline"></div>
+    </div>
+
+    <div class="settings-section">
+      <span class="field-label">Parcel Colors</span>
+      <div class="settings-color-row"><span>Walked</span><input type="color" id="settings-color-walked-parcel"></div>
+      <div class="settings-color-row"><span>Not walked</span><input type="color" id="settings-color-not-walked-parcel"></div>
+    </div>
+
+    <div id="settings-status"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="settings-reset" type="button">Reset</button>
+      <button class="btn primary" id="settings-save" type="button">Save</button>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ================== CONFIG ==================
+  // Paste the Web App URL you get from deploying apps-script/Code.gs
+  // (Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone).
+  var CONFIG = {
+    APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbw7SiYOrUjcMo6oCpOd7F-R7UiMDJ62rFC-WHV7E2h1lkAd9iupGtkA_oARazYAFyXuCw/exec",
+    CITY_BOUNDARY_URL: "data/city_boundary.geojson",
+    PARCELS_URL: "data/parcels.geojson",
+    PRECINCTS_URL: "data/precincts.geojson",
+    SITEADD_FIELD: "SITEADD",
+    PRECINCT_ID_FIELD: "id",
+    PARCEL_PRECINCT_FIELD: "PRECINCT_ID",
+    MAP_CENTER: [36.9791, -122.0330],
+    MAP_ZOOM: 14,
+    NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
+    NEIGHBORHOOD_ZOOM_PHONE: 18,     // further back on phones -- 19 and 20 both felt too tight on iPhone
+    PARCELS_MIN_ZOOM_DELTA: Math.log2(1 / 0.8),  // ~0.32 zoom levels = "20% closer" than the initial city-wide view -- precinct number labels turn on at this same threshold, see precinctLabelsMinZoom below
+    LABELS_MIN_ZOOM: 18,    // street-level zoom where individual lots are distinguishable enough for house numbers
+    SELECTED_PRECINCT_LABELS_MIN_ZOOM: 16  // below/at this zoom, even a selected precinct's compact labels are hidden -- too cluttered/illegible that far out
+  };
+
+  // Judge "phone" by the smaller viewport dimension so it stays correct
+  // across rotation (an iPhone is small in both orientations; an iPad or
+  // laptop is not).
+  function isPhoneSize() { return Math.min(window.innerWidth, window.innerHeight) <= 500; }
+  function getNeighborhoodZoom() { return isPhoneSize() ? CONFIG.NEIGHBORHOOD_ZOOM_PHONE : CONFIG.NEIGHBORHOOD_ZOOM_DESKTOP; }
+
+  var DEMO_MODE = !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0;
+  var demoUsers = {};     // username(lowercased) -> {password, displayName}                 (demo mode only)
+
+  // ================== STATE ==================
+  var map, boundaryLayer, parcelsLayer, precinctsLayer;
+  var parcelsVisible = false;      // parcels layer is withheld until zoomed in enough (see updateVisibleParcels)
+  var parcelsMinZoom = null;       // computed once the initial city-wide view is set
+  var precinctLabelsMinZoom = null; // computed once the initial city-wide view is set
+  // address(lowercased) -> { addressExact, precinctId, layers: [L.Layer,...], features: [...] }
+  // (grouped because a small number of addresses cover more than one parcel,
+  // e.g. adjacent lots recorded under the same site address)
+  var parcelIndex = {};
+  // precinctId(string) -> { feature, layer, parcelKeys: [address keys...] }
+  var precinctIndex = {};
+  var precinctStatusData = {};   // precinctId -> { status, completedDate, notes, updatedAt, updatedBy }
+  var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
+  var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
+  var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
+  var selectedAddressKey = null;
+  var selectedPrecinctId = null;
+  var currentUser = null;      // { username, displayName }
+  var locateWatchId = null;
+  var locationMarker = null, accuracyCircle = null;
+
+  // ---- zoom-level readout (Settings > Interface > "Show zoom level") ----
+  // A per-device display preference, not part of DEFAULT_SETTINGS/currentSettings
+  // -- it's for reporting a zoom-specific issue back to a developer, not
+  // something that should suddenly appear on every other canvasser's screen
+  // just because one person turned it on, so it lives in localStorage
+  // instead of the shared Settings sheet.
+  var SHOW_ZOOM_LEVEL_KEY = "a4m_showZoomLevel";
+  var showZoomLevel = false;
+  try { showZoomLevel = localStorage.getItem(SHOW_ZOOM_LEVEL_KEY) === "1"; } catch (e) { /* ignore (private browsing, etc.) */ }
+
+  // ---- precinct panel state ----
+  var openPrecinctId = null;      // precinct whose floating panel is currently open
+  var pendingStatus = null;       // unsaved precinct-status selection while the panel is open
+  var pendingCompletedDate = "";  // unsaved "Completed" date while the panel is open
+  var pendingWalked = {};         // address(lowercased) -> boolean -- unsaved swipe toggles this session
+  var walkArmed = false;          // true while the Walked checkbox is on (swipe-to-paint active)
+  var swiping = false;
+  var swipeTouchedThisStroke = {};
+
+  var PRECINCT_STATUSES = ["Not Yet Printed", "Printed", "Partially Walked", "Completed"];
+  var DEFAULT_PRECINCT_STATUS = "Not Yet Printed";
+  var PRECINCT_LEGEND_ID = {
+    "Not Yet Printed": "not-printed",
+    "Printed": "printed",
+    "Partially Walked": "partially-walked",
+    "Completed": "completed"
+  };
+
+  // ================== SETTINGS (Settings panel) ==================
+  // Colors + default basemap, all overridable live from the Settings panel
+  // (the gear icon in the topbar). These defaults match the CSS :root
+  // values below so there's no visual flash before any saved settings are
+  // fetched. Saving in the panel persists these as the shared default for
+  // every canvasser (see Code.gs's Settings sheet / saveSettings action).
+  var DEFAULT_SETTINGS = {
+    basemap: "Streets",
+    precinctFillOpacity: 0.22,   // how solid the precinct status fill looks on the map (0 = fully see-through, 1 = fully opaque)
+    colors: {
+      notYetPrinted: "#D1493F",
+      printed: "#E0B23F",
+      partiallyWalked: "#3FAE62",
+      completed: "#8E5FD1",
+      selectedBorder: "#0047AB",   // cobalt blue -- selected precinct's glowing border
+      precinctLabel: "#0047AB",    // cobalt blue -- precinct number labels
+      unselectedOutline: "#1A1A1A",
+      walkedParcel: "#14181D",
+      notWalkedParcel: "#4A6577",
+      headerTint: "#7C3AED"   // violet -- the gradient wash behind the topbar row and each sidebar section heading
+    }
+  };
+  function cloneSettings(s) { return JSON.parse(JSON.stringify(s)); }
+  // Merges a (possibly partial, e.g. from an older saved version) settings
+  // object onto a full base so a missing field falls back gracefully
+  // instead of turning into undefined and breaking a CSS/style call.
+  function mergeSettings(base, override) {
+    var merged = cloneSettings(base);
+    if (override && override.basemap) merged.basemap = override.basemap;
+    if (override && typeof override.precinctFillOpacity === "number" && !isNaN(override.precinctFillOpacity)) {
+      merged.precinctFillOpacity = Math.max(0, Math.min(1, override.precinctFillOpacity));
+    }
+    if (override && override.colors) {
+      Object.keys(merged.colors).forEach(function (k) {
+        if (override.colors[k]) merged.colors[k] = override.colors[k];
+      });
+    }
+    return merged;
+  }
+  var currentSettings = cloneSettings(DEFAULT_SETTINGS); // last applied (saved, or live-previewed) settings
+  var settingsUpdatedAt = null;   // server timestamp of currentSettings, so the sync poll only re-applies a newer save
+  var baseLayers = null;          // { "Hybrid": layer, "Satellite": layer, "Streets": layer } -- set in initMap()
+
+  // These four are plain JS values (not CSS var() references) because
+  // Leaflet's Canvas renderer draws to a <canvas> pixel buffer -- it can't
+  // resolve CSS custom properties the way the legend/list/label DOM can.
+  // applySettings() below keeps both in sync from one settings object.
+  var WALKED_COLOR_HEX = DEFAULT_SETTINGS.colors.walkedParcel;
+  var PARCEL_FILL_HEX = DEFAULT_SETTINGS.colors.notWalkedParcel;
+  var SELECTED_BORDER_HEX = DEFAULT_SETTINGS.colors.selectedBorder;
+  var UNSELECTED_OUTLINE_HEX = DEFAULT_SETTINGS.colors.unselectedOutline;
+  var PRECINCT_FILL_OPACITY = DEFAULT_SETTINGS.precinctFillOpacity;
+  var PRECINCT_STATUS_COLOR_HEX = {
+    "Not Yet Printed": DEFAULT_SETTINGS.colors.notYetPrinted,
+    "Printed": DEFAULT_SETTINGS.colors.printed,
+    "Partially Walked": DEFAULT_SETTINGS.colors.partiallyWalked,
+    "Completed": DEFAULT_SETTINGS.colors.completed
+  };
+
+  // Applies a settings object to both the CSS custom properties (legend
+  // swatches, precinct number label color, selected-precinct glow color)
+  // and the JS-side color constants above, switches the basemap, and
+  // re-renders anything already built -- so a live preview in the Settings
+  // panel, or another canvasser's saved change arriving via the background
+  // sync poll, shows up immediately with no page reload.
+  function applySettings(settings) {
+    var c = settings.colors;
+    var root = document.documentElement.style;
+    root.setProperty("--precinct-not-printed", c.notYetPrinted);
+    root.setProperty("--precinct-printed", c.printed);
+    root.setProperty("--precinct-partially-walked", c.partiallyWalked);
+    root.setProperty("--precinct-completed", c.completed);
+    root.setProperty("--precinct-selected-border", c.selectedBorder);
+    root.setProperty("--precinct-label-color", c.precinctLabel);
+    root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
+    root.setProperty("--walked-color", c.walkedParcel);
+    root.setProperty("--parcel-fill", c.notWalkedParcel);
+    // The tint itself needs an alpha channel to fade into transparent (see
+    // #topbar / .sidebar-header) -- <input type="color"> can't hold one, so
+    // the picker stores a plain opaque hex and this converts it to an rgba()
+    // at a fixed alpha every time settings are applied.
+    root.setProperty("--header-tint", hexToRgba(c.headerTint, HEADER_TINT_ALPHA));
+
+    WALKED_COLOR_HEX = c.walkedParcel;
+    PARCEL_FILL_HEX = c.notWalkedParcel;
+    SELECTED_BORDER_HEX = c.selectedBorder;
+    UNSELECTED_OUTLINE_HEX = c.unselectedOutline;
+    PRECINCT_FILL_OPACITY = (typeof settings.precinctFillOpacity === "number") ? settings.precinctFillOpacity : DEFAULT_SETTINGS.precinctFillOpacity;
+    PRECINCT_STATUS_COLOR_HEX = {
+      "Not Yet Printed": c.notYetPrinted,
+      "Printed": c.printed,
+      "Partially Walked": c.partiallyWalked,
+      "Completed": c.completed
+    };
+
+    setBasemap(settings.basemap);
+
+    if (precinctsLayer) precinctsLayer.setStyle(precinctStyle);
+    if (parcelsLayer) parcelsLayer.setStyle(parcelStyle);
+    if (selectedPrecinctId) updateSelectedPrecinctHighlight(selectedPrecinctId);
+    if (Object.keys(precinctIndex).length) buildPrecinctList($("precinct-search-input").value);
+  }
+
+  function setBasemap(name) {
+    if (!map || !baseLayers || !baseLayers[name]) return;
+    Object.keys(baseLayers).forEach(function (key) {
+      var layer = baseLayers[key];
+      if (key === name) { if (!map.hasLayer(layer)) map.addLayer(layer); }
+      else if (map.hasLayer(layer)) map.removeLayer(layer);
+    });
+  }
+
+  // ================== UTIL ==================
+  function $(id) { return document.getElementById(id); }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function keyFor(addr) { return String(addr || "").trim().toLowerCase(); }
+  function cssEscape(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&"); }
+
+  // Fixed alpha the header-tint gradient (topbar + sidebar section headings)
+  // is drawn at -- the Settings panel only lets you pick the color itself.
+  var HEADER_TINT_ALPHA = 0.16;
+  function hexToRgba(hex, alpha) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return hex; // not a plain #rrggbb -- hand back whatever we got rather than guess
+    var num = parseInt(m[1], 16);
+    var r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+    return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
+  }
+
+  async function sha256Hex(text) {
+    var enc = new TextEncoder().encode(text);
+    var digest = await crypto.subtle.digest("SHA-256", enc);
+    return Array.from(new Uint8Array(digest)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+
+  function apiGet(action, params) {
+    var url = new URL(CONFIG.APPS_SCRIPT_URL);
+    url.searchParams.set("action", action);
+    Object.keys(params || {}).forEach(function (k) { url.searchParams.set(k, params[k]); });
+    return fetch(url.toString()).then(function (r) { return r.json(); });
+  }
+  function apiPost(payload) {
+    // text/plain avoids a CORS preflight against Apps Script web apps.
+    return fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); });
+  }
+
+  // ================== LOGIN ==================
+  function initLoginNote() {
+    if (DEMO_MODE) {
+      $("login-config-note").textContent =
+        "Demo mode: the Apps Script backend isn't configured yet, so any username/password will work and nothing is saved to a real Sheet. See README.md.";
+    } else {
+      $("login-config-note").textContent = "";
+    }
+  }
+
+  $("login-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var username = $("login-username").value.trim();
+    var password = $("login-password").value;
+    var errorEl = $("login-error");
+    var submitBtn = $("login-submit");
+    errorEl.textContent = "";
+    if (!username || !password) return;
+
+    if (!DEMO_MODE && (!window.crypto || !window.crypto.subtle)) {
+      // crypto.subtle (used to hash the password before sending it) only
+      // exists on secure origins -- https://, or http://localhost. On a
+      // plain http:// page it's simply undefined, which otherwise surfaces
+      // as a misleading "could not reach the server" message below.
+      errorEl.textContent = "Logging in requires a secure (https://) page. This page is currently loaded over plain http, so the browser won't allow password hashing.";
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Signing in\u2026";
+    try {
+      if (DEMO_MODE) {
+        currentUser = { username: username, displayName: username };
+      } else {
+        var hash = await sha256Hex(password);
+        var res = await apiPost({ action: "login", username: username, passwordHash: hash });
+        if (!res || !res.ok) {
+          errorEl.textContent = (res && res.error) || "Invalid username or password.";
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Log in";
+          return;
+        }
+        currentUser = { username: username, displayName: res.displayName || username };
+      }
+      sessionStorage.setItem("a4m_user", JSON.stringify(currentUser));
+      enterApp();
+    } catch (err) {
+      errorEl.textContent = "Could not reach the login server. Check your connection and try again.";
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Log in";
+    }
+  });
+
+  $("logout-btn").addEventListener("click", function () {
+    sessionStorage.removeItem("a4m_user");
+    location.reload();
+  });
+
+  function enterApp() {
+    $("login-overlay").classList.add("hide");
+    $("user-chip-name").textContent = currentUser.displayName || currentUser.username;
+    if (DEMO_MODE) $("demo-banner").classList.add("show");
+    $("main-layout").classList.toggle("with-banner", DEMO_MODE);
+    if (!map) {
+      $("loading-overlay").classList.add("show");
+      initMap();
+    }
+  }
+
+  function checkExistingSession() {
+    try {
+      var saved = sessionStorage.getItem("a4m_user");
+      if (saved) {
+        currentUser = JSON.parse(saved);
+        enterApp();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // ================== MAP ==================
+  function initMap() {
+    // preferCanvas: this app can be handed real parcel layers with many
+    // thousands of polygons; Canvas rendering stays smooth where SVG (the
+    // Leaflet default) bogs down.
+    // minZoom/zoomSnap/zoomDelta match the Voter Precinct Map webpage's map
+    // init (finer zoom steps, and a floor so you can't zoom out past the
+    // whole city). maxZoom stays 20 here (the precinct page used 19) since
+    // that's what the "zoom in on selection" feature relies on for the
+    // desktop neighborhood zoom.
+    map = L.map("map", { zoomControl: true, preferCanvas: true, minZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
+
+    var streetsLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 20,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    var ESRI_ATTRIBUTION = "Imagery &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, and the GIS community";
+
+    var satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+
+    // Hybrid = satellite imagery + Esri's free reference overlays (roads with
+    // street names, place/city labels) stacked on top -- same free, no-API-key
+    // Esri service as the plain satellite layer, just combined into one group
+    // so it behaves as a single base-layer choice. This is the default view.
+    var hybridImagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+    var transportationLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+    var placeLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 20,
+      maxNativeZoom: 19,
+      attribution: ESRI_ATTRIBUTION
+    });
+    var hybridLayer = L.layerGroup([hybridImagery, transportationLabels, placeLabels]);
+
+    baseLayers = { "Hybrid": hybridLayer, "Satellite": satelliteLayer, "Streets": streetsLayer };
+    // Streets is the out-of-the-box default; a saved setting (see the
+    // Settings panel) can switch this once it's fetched, via setBasemap().
+    setBasemap(currentSettings.basemap || DEFAULT_SETTINGS.basemap);
+
+    L.control.layers(
+      baseLayers,
+      null,
+      { position: "topright" }
+    ).addTo(map);
+
+    addLocateControl();
+
+    map.on("click", function () { deselectParcel(); });
+    map.on("zoomend", updateVisibleParcels);
+    map.on("moveend", updateVisibleParcels);
+    map.on("zoomend", updatePrecinctLabelsVisibility);
+    // "zoom" (not just "zoomend") so the readout keeps up live during a
+    // pinch/scroll or an animated flyTo/flyToBounds, not just once it settles.
+    map.on("zoom zoomend", updateZoomLevelIndicator);
+    applyShowZoomLevel();
+    setupSwipeToWalk();
+
+    Promise.all([
+      fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
+      fetch(CONFIG.PARCELS_URL).then(function (r) { return r.json(); }),
+      fetch(CONFIG.PRECINCTS_URL).then(function (r) { return r.json(); }),
+      DEMO_MODE
+        ? Promise.resolve({ ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() })
+        : apiGet("all", {}).catch(function () { return { ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() }; })
+    ]).then(function (results) {
+      var boundaryGeoJson = results[0];
+      var parcelsGeoJson = results[1];
+      var precinctsGeoJson = results[2];
+      var stateRes = results[3];
+
+      if (stateRes && stateRes.ok) {
+        (stateRes.precincts || []).forEach(function (p) {
+          precinctStatusData[String(p.precinctId)] = { status: p.status, completedDate: p.completedDate, notes: p.notes || "", updatedAt: p.updatedAt, updatedBy: p.updatedBy };
+        });
+        (stateRes.parcels || []).forEach(function (pc) {
+          parcelWalkedData[keyFor(pc.address)] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
+        });
+        if (stateRes.settings) {
+          currentSettings = mergeSettings(DEFAULT_SETTINGS, stateRes.settings);
+          settingsUpdatedAt = stateRes.settingsUpdatedAt || null;
+        }
+      }
+      lastSyncAt = (stateRes && stateRes.serverTime) || new Date().toISOString();
+      // Re-apply now that a saved shared default (if any) is merged in --
+      // before the precinct/parcel layers below are built, so their very
+      // first render already uses the right colors/basemap with no flash.
+      applySettings(currentSettings);
+
+      addBoundaryDimming(boundaryGeoJson);
+      addPrecincts(precinctsGeoJson);
+      addParcels(parcelsGeoJson);
+      addBoundaryOutline(boundaryGeoJson);
+      buildPrecinctList();
+      try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
+
+      // Parcels stay hidden until the viewer has zoomed in noticeably closer
+      // than this initial city-wide view -- 11k+ parcel outlines at a
+      // city-wide zoom is just clutter, and it's a lot to draw at once.
+      // Precincts (far fewer, much larger shapes) stay visible at every zoom.
+      parcelsMinZoom = map.getZoom() + CONFIG.PARCELS_MIN_ZOOM_DELTA;
+      updateVisibleParcels();
+
+      // Precinct number labels turn on at that exact same threshold as the
+      // parcels layer (which is what shows walked/not-walked status) -- so
+      // the numbers appear right when there's enough detail on screen to
+      // actually use them to find a specific parcel.
+      precinctLabelsMinZoom = parcelsMinZoom;
+      updatePrecinctLabelsVisibility();
+
+      $("loading-overlay").classList.remove("show");
+
+      // Other canvassers may be updating the same Sheet at the same time --
+      // periodically pull just what's changed since our last check (instead
+      // of re-fetching everything) and quietly patch it in.
+      if (!DEMO_MODE) setInterval(pollForUpdates, SYNC_POLL_MS);
+    }).catch(function (err) {
+      $("address-list").innerHTML = '<li class="empty-msg">Could not load map data: ' + escapeHtml(err.message || String(err)) + "</li>";
+      $("loading-overlay").classList.remove("show");
+    });
+  }
+
+  // Pulls only the precinct/parcel rows updated since our last check and
+  // patches them in -- keeps everyone's map/lists/legend in sync with what
+  // other canvassers are recording, without re-fetching the whole dataset.
+  function pollForUpdates() {
+    apiGet("since", { since: lastSyncAt }).then(function (res) {
+      if (!res || !res.ok) return;
+      var anySkipped = false;
+      var touchedAny = false;
+
+      (res.precincts || []).forEach(function (p) {
+        var id = String(p.precinctId);
+        // If this precinct's panel is open right now, leave it alone --
+        // don't overwrite what the user is actively looking at/editing.
+        // Also hold back the sync watermark so it's retried on a later poll
+        // once the panel is closed, instead of being skipped forever.
+        if (openPrecinctId === id) { anySkipped = true; return; }
+        precinctStatusData[id] = { status: p.status, completedDate: p.completedDate, notes: p.notes || "", updatedAt: p.updatedAt, updatedBy: p.updatedBy };
+        restylePrecinct(id);
+        touchedAny = true;
+      });
+
+      (res.parcels || []).forEach(function (pc) {
+        var key = keyFor(pc.address);
+        var belongsToOpenPrecinct = openPrecinctId && precinctIndex[openPrecinctId] &&
+          precinctIndex[openPrecinctId].parcelKeys.indexOf(key) !== -1;
+        if (belongsToOpenPrecinct) { anySkipped = true; return; }
+        parcelWalkedData[key] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
+        restyleEntry(key);
+        touchedAny = true;
+      });
+
+      if (touchedAny) {
+        buildPrecinctList($("precinct-search-input").value);
+        buildAddressList($("search-input").value);
+      }
+      // Another canvasser may have saved new Settings-panel colors/basemap
+      // since our last check -- pick them up the same way, unless our own
+      // panel is currently open with unsaved edits (applySettingsFromServer
+      // checks that, and that lastSyncAt still advances even when it does).
+      if (res.settings) applySettingsFromServer(mergeSettings(DEFAULT_SETTINGS, res.settings), res.settingsUpdatedAt);
+      if (res.serverTime && !anySkipped) lastSyncAt = res.serverTime;
+    }).catch(function () { /* silent -- the next poll will just try again */ });
+  }
+
+  // Parcels are attached to the map one at a time, and only the ones near
+  // the current viewport -- not the whole 11k+ dataset at once. Even with
+  // strokes off, having every parcel in the city permanently registered
+  // with the renderer once you cross the zoom threshold is what was still
+  // making pan/zoom feel sluggish on iPhone: Leaflet has to walk every
+  // attached layer on every redraw. Capping that to "what's roughly on
+  // screen" (a padded viewport) keeps the attached count in the low
+  // hundreds regardless of city size.
+  function updateVisibleParcels() {
+    if (!parcelsLayer || parcelsMinZoom === null) return;
+    var zoom = map.getZoom();
+
+    if (zoom < parcelsMinZoom) {
+      if (parcelsVisible) {
+        Object.keys(parcelIndex).forEach(function (key) {
+          var entry = parcelIndex[key];
+          entry.layers.forEach(function (l) { if (l._map) map.removeLayer(l); });
+          removeNumberLabel(entry);
+        });
+        parcelsVisible = false;
+      }
+      return;
+    }
+    parcelsVisible = true;
+
+    var viewBounds = map.getBounds().pad(0.25); // 25% buffer so nearby parcels are ready just before they scroll into view
+    // Labels normally wait for real street-level zoom (LABELS_MIN_ZOOM) --
+    // but a selected precinct's own parcels get labeled as soon as they're
+    // visible at all, even though zoomToFitPrecinct often settles at a zoom
+    // well below that threshold (it fits the WHOLE precinct, not one lot).
+    // Those get the "compact" (smaller) label style below since each parcel
+    // is a lot smaller on screen at that zoom than a normal LABELS_MIN_ZOOM
+    // view would make it. Below SELECTED_PRECINCT_LABELS_MIN_ZOOM, though,
+    // even the compact labels are too small/cluttered to be worth showing,
+    // so they stay off until the canvasser zooms in a bit further.
+    var globalLabelsOn = zoom >= CONFIG.LABELS_MIN_ZOOM;
+    var selectedPrecinctLabelsOn = zoom > CONFIG.SELECTED_PRECINCT_LABELS_MIN_ZOOM;
+
+    Object.keys(parcelIndex).forEach(function (key) {
+      var entry = parcelIndex[key];
+      var anyInView = false;
+      entry.layers.forEach(function (l) {
+        if (!l.__cachedBounds) l.__cachedBounds = l.getBounds();
+        var inView = viewBounds.intersects(l.__cachedBounds);
+        if (inView) anyInView = true;
+        if (inView && !l._map) map.addLayer(l);
+        else if (!inView && l._map) map.removeLayer(l);
+      });
+
+      var inSelectedPrecinct = !!(selectedPrecinctId && entry.precinctId === selectedPrecinctId);
+      var showLabel = globalLabelsOn || (inSelectedPrecinct && selectedPrecinctLabelsOn);
+      if (anyInView && entry.numberText && showLabel) {
+        addNumberLabel(entry, !globalLabelsOn);
+      } else {
+        removeNumberLabel(entry);
+      }
+    });
+  }
+
+  // House-number labels ride the same visibility pass as the parcel
+  // polygons above -- only ever a few dozen exist at once, drawn from the
+  // SITEADD data we already have (no external dataset needed).
+  // compact -- use the smaller ".compact" label style (see the selected
+  // precinct case in updateVisibleParcels above).
+  function addNumberLabel(entry, compact) {
+    if (entry.labelMarker && entry.labelCompact === compact) return;
+    if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
+    var center;
+    try { center = groupBounds(entry).getCenter(); } catch (e) { return; }
+    entry.labelCompact = compact;
+    entry.labelMarker = L.marker(center, {
+      icon: L.divIcon({ className: "parcel-number-label" + (compact ? " compact" : ""), html: "<span>" + escapeHtml(entry.numberText) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
+      interactive: false,
+      keyboard: false
+    }).addTo(map);
+  }
+
+  function removeNumberLabel(entry) {
+    if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
+    entry.labelCompact = null;
+  }
+
+  // ================== ZOOM LEVEL READOUT ==================
+  function applyShowZoomLevel() {
+    $("zoom-level-indicator").hidden = !showZoomLevel;
+    if (showZoomLevel) updateZoomLevelIndicator();
+  }
+
+  function updateZoomLevelIndicator() {
+    if (!showZoomLevel || !map) return;
+    $("zoom-level-indicator").textContent = "Zoom " + map.getZoom().toFixed(2);
+  }
+
+  // ================== MY LOCATION ==================
+  function addLocateControl() {
+    var LocateControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var container = L.DomUtil.create("div", "leaflet-bar leaflet-control locate-control");
+        var link = L.DomUtil.create("a", "locate-control-link", container);
+        link.href = "#";
+        link.title = "Show my location";
+        link.setAttribute("role", "button");
+        link.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+          '<circle cx="12" cy="12" r="3"></circle>' +
+          '<path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg>';
+        L.DomEvent.on(link, "click", L.DomEvent.stop).on(link, "click", function () {
+          toggleLocate(link);
+        });
+        return container;
+      }
+    });
+    map.addControl(new LocateControl());
+  }
+
+  function toggleLocate(linkEl) {
+    if (locateWatchId !== null) {
+      navigator.geolocation.clearWatch(locateWatchId);
+      locateWatchId = null;
+      if (locationMarker) { map.removeLayer(locationMarker); locationMarker = null; }
+      if (accuracyCircle) { map.removeLayer(accuracyCircle); accuracyCircle = null; }
+      linkEl.classList.remove("active");
+      return;
+    }
+    if (!navigator.geolocation) {
+      alert("Location isn't available in this browser.");
+      return;
+    }
+    if (window.isSecureContext === false) {
+      // Browsers refuse geolocation on plain http:// (localhost is exempt),
+      // which otherwise surfaces as a confusing generic error below.
+      alert("Location requires a secure (https://) page, or testing at http://localhost. This page is currently loaded over plain http, so the browser blocks location access.");
+      return;
+    }
+    linkEl.classList.add("active");
+    var firstFix = true;
+    locateWatchId = navigator.geolocation.watchPosition(
+      function (pos) {
+        var latlng = [pos.coords.latitude, pos.coords.longitude];
+        if (!locationMarker) {
+          locationMarker = L.marker(latlng, {
+            icon: L.divIcon({ className: "user-location-marker", html: '<div class="user-location-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
+            zIndexOffset: 2000,
+            interactive: false
+          }).addTo(map);
+          accuracyCircle = L.circle(latlng, {
+            radius: pos.coords.accuracy,
+            color: "#1257FF",
+            weight: 1,
+            fillColor: "#1257FF",
+            fillOpacity: 0.08,
+            interactive: false
+          }).addTo(map);
+        } else {
+          locationMarker.setLatLng(latlng);
+          accuracyCircle.setLatLng(latlng);
+          accuracyCircle.setRadius(pos.coords.accuracy);
+        }
+        if (firstFix) {
+          map.setView(latlng, Math.max(map.getZoom(), 16));
+          firstFix = false;
+        }
+      },
+      function (err) {
+        linkEl.classList.remove("active");
+        locateWatchId = null;
+        var msg = "Could not get your location: " + err.message;
+        if (err.code === 1) {
+          // PERMISSION_DENIED -- this is the browser's own per-site setting,
+          // not something the app controls. Point people at the fix instead
+          // of leaving them stuck on the raw browser message.
+          msg += "\n\nYour browser has location blocked for this page. Look for a location/lock icon in the address bar, open its site permissions, and set Location to Allow, then try again. On a phone, also check that Location Services is turned on for that browser under your device's system Settings.";
+        }
+        alert(msg);
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    );
+  }
+
+  function addBoundaryDimming(boundaryGeoJson) {
+    var mask;
+    try {
+      mask = turf.mask(boundaryGeoJson);
+    } catch (e) {
+      console.warn("Could not build dim mask from city boundary; skipping dim overlay.", e);
+      return;
+    }
+    // Matches the Voter Precinct Map webpage's cityMaskLayer/cityGlowLayer values.
+    // Just the dim "everywhere outside the city" shading -- this belongs
+    // underneath the precincts/parcels layers, so it's added first, before
+    // they are. The crisp boundary line itself is a separate layer (see
+    // addBoundaryOutline below) added *after* precincts/parcels so it stays
+    // visible on top instead of getting drawn over by them.
+    var dimStyle = { stroke: false, fillColor: "#08101a", fillOpacity: 0.3 };
+    boundaryLayer = L.geoJSON(mask, { interactive: false, style: dimStyle }).addTo(map);
+
+    // turf.mask() only ever subtracts each polygon's OUTER ring from the
+    // world -- any interior holes in the boundary (enclaves that aren't
+    // really part of the canvassing area, or small gaps between adjacent
+    // precinct shapes) come back through untouched and never get dimmed on
+    // their own, even though they're just as "not in the city" as the area
+    // outside the boundary entirely. Add each hole as its own small dimmed
+    // polygon so it gets the same shading.
+    var enclaves = extractInteriorRings(boundaryGeoJson);
+    if (enclaves.length) {
+      L.geoJSON({ type: "FeatureCollection", features: enclaves }, {
+        interactive: false,
+        style: dimStyle
+      }).addTo(map);
+    }
+  }
+
+  // Pulls every interior ring (hole) out of a boundary GeoJSON's Polygon(s)/
+  // MultiPolygon(s), each as its own standalone Polygon feature -- see the
+  // turf.mask() limitation noted in addBoundaryDimming above.
+  function extractInteriorRings(geojson) {
+    var rings = [];
+    function fromPolygonCoords(coords) {
+      for (var i = 1; i < coords.length; i++) {
+        rings.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords[i]] } });
+      }
+    }
+    function fromGeometry(geom) {
+      if (!geom) return;
+      if (geom.type === "Polygon") fromPolygonCoords(geom.coordinates);
+      else if (geom.type === "MultiPolygon") geom.coordinates.forEach(fromPolygonCoords);
+    }
+    if (geojson.type === "FeatureCollection") geojson.features.forEach(function (f) { fromGeometry(f.geometry); });
+    else if (geojson.type === "Feature") fromGeometry(geojson.geometry);
+    else fromGeometry(geojson);
+    return rings;
+  }
+
+  // Outlines the actual city boundary. Deliberately added to the map *after*
+  // the precincts and parcels layers (see the addPrecincts/addParcels call
+  // order in initMap) so this thin line renders on top of them instead of
+  // being drawn first and then covered by the precinct fills.
+  function addBoundaryOutline(boundaryGeoJson) {
+    L.geoJSON(boundaryGeoJson, {
+      interactive: false,
+      style: { color: "#000000", weight: 2.5, opacity: 1, fill: false }
+    }).addTo(map);
+  }
+
+  function getAddr(feature) {
+    return feature && feature.properties ? feature.properties[CONFIG.SITEADD_FIELD] : null;
+  }
+
+  // ================== WALKED STATE HELPERS ==================
+  // "Committed" = what's saved on the server (or, in demo mode, saved
+  // locally); "current" = committed, overridden by any not-yet-saved swipe
+  // toggle made during this precinct panel session.
+  function committedWalked(key) { return !!(parcelWalkedData[key] && parcelWalkedData[key].walked); }
+  function currentWalked(key) { return pendingWalked.hasOwnProperty(key) ? pendingWalked[key] : committedWalked(key); }
+
+  // ================== PARCEL STYLING ==================
+  function styleForKey(key) {
+    var entry = parcelIndex[key];
+    var isSelected = key && key === selectedAddressKey;
+    // While a precinct's panel is open, every parcel that belongs to it gets
+    // a thin outline too -- with 10-300+ lots often packed tightly together,
+    // seeing each one's boundary makes it much easier to tell where one
+    // property ends and the next begins while swiping to mark them walked.
+    var inSelectedPrecinct = !!(entry && selectedPrecinctId && entry.precinctId === selectedPrecinctId);
+    var walked = currentWalked(key);
+    var stateColor = walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX;
+    return {
+      // Outlines are otherwise skipped entirely -- stroking 10k+ paths is
+      // the expensive part of drawing this layer on lower-powered devices,
+      // and the fill alone is enough to read the parcels everywhere else.
+      stroke: isSelected || inSelectedPrecinct,
+      // The selected (address-search) outline matches that parcel's own
+      // walked/not-walked color rather than a fixed color, so it reads as
+      // "this parcel, and here's its state" together.
+      color: isSelected ? stateColor : UNSELECTED_OUTLINE_HEX,
+      // Weight 1 / opacity 0.6 (the original values here) turned out to
+      // blend into the precinct fill and the parcels' own low-opacity fill
+      // closely enough that the outline was easy to miss entirely rather
+      // than just subtle -- bumped both so it reads clearly at a glance.
+      weight: isSelected ? 3 : (inSelectedPrecinct ? 1.5 : 0),
+      opacity: isSelected ? 1 : (inSelectedPrecinct ? 0.9 : 0.6),
+      fillColor: stateColor,
+      fillOpacity: walked ? 0.6 : (isSelected ? 0.3 : 0.12)
+    };
+  }
+
+  function parcelStyle(feature) {
+    var addr = getAddr(feature);
+    return styleForKey(keyFor(addr));
+  }
+
+  // Restyle just the handful of layers belonging to one address, instead of
+  // walking the whole 11k+-feature dataset. Selecting/deselecting or
+  // toggling "walked" only ever changes the look of a small number of
+  // addresses, so there's no reason to touch the rest.
+  function restyleEntry(key) {
+    var entry = parcelIndex[key];
+    if (!entry) return;
+    var style = styleForKey(key);
+    entry.layers.forEach(function (l) { l.setStyle(style); });
+  }
+
+  function addParcels(parcelsGeoJson) {
+    parcelsLayer = L.geoJSON(parcelsGeoJson, {
+      style: parcelStyle,
+      // Parcels are click-through: selecting/zooming to an address is only
+      // ever done from the Address list now, not by clicking its shape on
+      // the map. Marking the layer non-interactive also means a click on a
+      // parcel falls straight through to whatever's underneath it (the
+      // precinct it sits inside), instead of the parcel intercepting it.
+      interactive: false,
+      onEachFeature: function (feature, layer) {
+        var addr = getAddr(feature);
+        if (!addr) return;
+        var key = keyFor(addr);
+        var precinctId = feature.properties ? String(feature.properties[CONFIG.PARCEL_PRECINCT_FIELD] || "") : "";
+        if (!parcelIndex[key]) {
+          var numMatch = addr.match(/^(\d+[A-Za-z]?)/);
+          parcelIndex[key] = { addressExact: addr, precinctId: precinctId, layers: [], features: [], numberText: numMatch ? numMatch[1] : "", labelMarker: null };
+          if (precinctId && precinctIndex[precinctId] && precinctIndex[precinctId].parcelKeys.indexOf(key) === -1) {
+            precinctIndex[precinctId].parcelKeys.push(key);
+          }
+        }
+        parcelIndex[key].layers.push(layer);
+        parcelIndex[key].features.push(feature);
+      }
+    });
+    // Not added to the map yet -- updateVisibleParcels() reveals nearby ones once
+    // the viewer has zoomed in past parcelsMinZoom.
+
+    buildAddressList();
+  }
+
+  // ================== PRECINCTS ==================
+  // "Committed" = last saved status; "current" = committed, overridden by an
+  // in-progress (not yet saved) status choice while that precinct's panel is
+  // open -- same committed-vs-pending pattern as currentWalked() above, so
+  // the map's fill color updates the instant you click a status button
+  // instead of waiting for Save.
+  function committedPrecinctStatus(id) {
+    var entry = precinctStatusData[id];
+    return (entry && entry.status) || DEFAULT_PRECINCT_STATUS;
+  }
+  function precinctStatusFor(id) {
+    if (id === openPrecinctId && pendingStatus) return pendingStatus;
+    return committedPrecinctStatus(id);
+  }
+
+  function precinctStyle(feature) {
+    var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
+    var isSelected = id === selectedPrecinctId;
+    var status = precinctStatusFor(id);
+    // While swipe-to-walk is armed for this precinct, drop its status fill
+    // entirely (but keep the outline) so the status color doesn't compete
+    // with the walked/not-walked parcel colors you're busy comparing.
+    var colorSuppressed = walkArmed && id === openPrecinctId;
+    // The selected precinct's fill stays a touch more solid than the base
+    // transparency the slider controls, so it still reads as "selected"
+    // even at low settings -- but never past fully opaque.
+    var baseFillOpacity = PRECINCT_FILL_OPACITY;
+    var selectedFillOpacity = Math.min(1, baseFillOpacity + 0.08);
+    return {
+      stroke: true,
+      color: isSelected ? SELECTED_BORDER_HEX : UNSELECTED_OUTLINE_HEX,
+      weight: isSelected ? 3 : 1.75,
+      opacity: isSelected ? 1 : 0.9,
+      fillColor: PRECINCT_STATUS_COLOR_HEX[status],
+      fillOpacity: colorSuppressed ? 0 : (isSelected ? selectedFillOpacity : baseFillOpacity)
+    };
+  }
+
+  function restylePrecinct(id) {
+    var p = precinctIndex[id];
+    if (p && p.layer) p.layer.setStyle(precinctStyle(p.feature));
+  }
+
+  // Restyles just the parcels that belong to one precinct -- used to turn
+  // their outline on/off as a precinct becomes selected/deselected, without
+  // touching the other 10k+ parcels elsewhere on the map.
+  function restylePrecinctParcels(id) {
+    var p = id && precinctIndex[id];
+    if (!p) return;
+    p.parcelKeys.forEach(restyleEntry);
+  }
+
+  // A point guaranteed to fall inside the precinct's own polygon (unlike a
+  // bounding-box center, which can land outside an irregular/concave
+  // precinct shape) -- used to place its number label.
+  function precinctLabelLatLng(feature, layer) {
+    try {
+      var pt = turf.pointOnFeature(feature);
+      var c = pt.geometry.coordinates;
+      return L.latLng(c[1], c[0]);
+    } catch (e) {
+      return layer.getBounds().getCenter();
+    }
+  }
+
+  function addPrecincts(precinctsGeoJson) {
+    precinctsLayer = L.geoJSON(precinctsGeoJson, {
+      style: precinctStyle,
+      onEachFeature: function (feature, layer) {
+        var id = String(feature.properties[CONFIG.PRECINCT_ID_FIELD]);
+        // Built now, but not attached to the map yet -- at the initial
+        // city-wide view, 69 of these at once is just a wall of oversized
+        // numbers. updatePrecinctLabelsVisibility() (below) adds them once
+        // the viewer has zoomed in a bit.
+        var labelMarker = L.marker(precinctLabelLatLng(feature, layer), {
+          icon: L.divIcon({ className: "precinct-number-label", html: "<span>" + escapeHtml(id) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
+          interactive: false,
+          keyboard: false
+        });
+        precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [], labelMarker: labelMarker };
+        layer.on("click", function (e) {
+          // Swipe-to-walk owns clicks on the map while armed -- without this
+          // guard, a swipe stroke that starts on the open precinct's own
+          // polygon (true for most swipes, since parcels sit inside it) can
+          // still register as a "click" on that polygon (Leaflet's touch/tap
+          // handling and/or native click can fire independently of our own
+          // pointerdown handling), re-selecting the precinct mid-swipe and
+          // silently discarding whatever was just painted.
+          if (walkArmed) return;
+          L.DomEvent.stopPropagation(e);
+          selectPrecinct(id);
+        });
+      }
+    }).addTo(map);
+    // Precincts themselves are large, few in number, and meant to be visible
+    // at every zoom level (unlike the individual parcels), so the shapes are
+    // added directly rather than going through viewport-windowed visibility.
+    // Their number labels are handled separately, gated on zoom (see above).
+  }
+
+  // Shows/hides every precinct's number label together, based on zoom --
+  // there's only 69 of them (unlike the viewport-windowed parcel labels), so
+  // there's no need to window these by location too, just by zoom level.
+  function updatePrecinctLabelsVisibility() {
+    if (precinctLabelsMinZoom === null) return;
+    // The tiny epsilon guards against floating-point dust in the added zoom
+    // delta (e.g. 14.999999999999998 instead of 15) landing a hair under
+    // the threshold right when a zoom exactly matches it.
+    var show = map.getZoom() >= precinctLabelsMinZoom - 1e-9;
+    Object.keys(precinctIndex).forEach(function (id) {
+      var marker = precinctIndex[id].labelMarker;
+      if (!marker) return;
+      if (show && !marker._map) map.addLayer(marker);
+      else if (!show && marker._map) map.removeLayer(marker);
+    });
+  }
+
+  function selectPrecinct(id) {
+    var previous = selectedPrecinctId;
+    selectedPrecinctId = id;
+    if (previous && previous !== id) {
+      restylePrecinct(previous);
+      restylePrecinctParcels(previous);
+    }
+    restylePrecinct(id);
+    restylePrecinctParcels(id);
+    updateSelectedPrecinctHighlight(id);
+    highlightPrecinctListItem(id);
+    // If a different precinct's panel is already open, close it right away
+    // rather than leaving it on screen (at its old position) for the whole
+    // duration of the fly-to-precinct animation below -- openPrecinctPanel(id)
+    // itself is now deferred until that animation finishes (see
+    // zoomToFitPrecinct's onDone callback), so nothing later does this for us.
+    if (openPrecinctId && openPrecinctId !== id) closePrecinctPanel(true, { keepSelectionState: true });
+    // Also refresh immediately (not just via the fly animation's zoomend) --
+    // if the precinct is already fully in view at the current zoom,
+    // flyToBounds may not move the map at all, and the new precinct's
+    // parcels still need their labels turned on right away.
+    updateVisibleParcels();
+    // Wait for the fly-to-precinct animation to actually finish before
+    // showing the info panel -- otherwise it pops up at a stale,
+    // pre-animation position and visibly snaps once the flight settles.
+    zoomToFitPrecinct(id, function () {
+      // Guard against a rapid re-click / precinct switch while the flight
+      // was in progress: only open the panel for whichever precinct is
+      // still selected by the time this fires.
+      if (selectedPrecinctId === id) openPrecinctPanel(id);
+    });
+  }
+
+  var selectedPrecinctHighlightLayer = null;
+
+  // A lone SVG-rendered outline (see the .precinct-selected-highlight CSS
+  // filter) drawn just for the selected precinct, on top of the shared
+  // Canvas-rendered precinct/parcel layers -- gives it a soft cobalt glow
+  // that a Canvas path can't have on its own.
+  function updateSelectedPrecinctHighlight(id) {
+    if (selectedPrecinctHighlightLayer) {
+      map.removeLayer(selectedPrecinctHighlightLayer);
+      selectedPrecinctHighlightLayer = null;
+    }
+    var p = id && precinctIndex[id];
+    if (!p) return;
+    selectedPrecinctHighlightLayer = L.geoJSON(p.feature, {
+      renderer: L.svg(),
+      interactive: false,
+      style: {
+        className: "precinct-selected-highlight",
+        color: SELECTED_BORDER_HEX,
+        weight: 4,
+        opacity: 1,
+        fill: false
+      }
+    }).addTo(map);
+  }
+
+  // onDone (optional) fires once the fly-to-precinct animation has truly
+  // settled. Listeners are bound BEFORE flyToBounds is called (so there's no
+  // race if the animation somehow resolves synchronously). A single
+  // flyToBounds call can, in practice, fire more than one movestart/moveend
+  // burst before the view is really done settling (observed directly: a
+  // short ~150ms burst followed by a gap, then the "real" ~500ms flight) --
+  // trusting the very first moveend reopens the exact bug this is fixing,
+  // just shifted slightly later. So instead of watching moveend, this
+  // watches the continuous "move"/"zoom" progress events fired throughout
+  // *any* animation and waits for a short quiet period (no further activity)
+  // before considering the flight over -- robust to however many bursts
+  // Leaflet's internals end up producing, and to a slow/loaded browser
+  // stretching the animation well past its nominal duration. A short timeout
+  // only catches the case where flyToBounds decides there's nothing to move
+  // at all (already exactly in view, so no move/zoom events ever fire); a
+  // generous absolute failsafe still guarantees onDone is never stuck
+  // forever in some unexpected edge case.
+  function zoomToFitPrecinct(id, onDone) {
+    var p = precinctIndex[id];
+    if (!p) { if (onDone) onDone(); return; }
+    var done = false;
+    var sawActivity = false;
+    var settleTimer = null;
+    var QUIET_MS = 150;
+    function finish() {
+      if (done) return;
+      done = true;
+      map.off("move", onActivity);
+      map.off("zoom", onActivity);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (onDone) onDone();
+    }
+    function onActivity() {
+      sawActivity = true;
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(finish, QUIET_MS);
+    }
+    if (onDone) {
+      map.on("move", onActivity);
+      map.on("zoom", onActivity);
+      setTimeout(function () { if (!sawActivity) finish(); }, 250);
+      setTimeout(finish, 5000);
+    }
+    try {
+      map.flyToBounds(p.layer.getBounds(), { padding: [40, 40], duration: 0.5, maxZoom: 19 });
+    } catch (e) {
+      finish();
+    }
+  }
+
+  // ================== PRECINCT LIST ==================
+  // filterText matches the same way the Address search does: a plain
+  // case-insensitive substring match against the precinct number, so typing
+  // "312" finds 31200, 31201, etc.
+  function buildPrecinctList(filterText) {
+    var listEl = $("precinct-list");
+    var allIds = Object.keys(precinctIndex);
+    var ids = allIds.slice().sort(function (a, b) { return Number(a) - Number(b); });
+
+    var q = (filterText || "").trim().toLowerCase();
+    if (q) ids = ids.filter(function (id) { return id.toLowerCase().indexOf(q) !== -1; });
+
+    if (!allIds.length) {
+      listEl.innerHTML = '<li class="empty-msg">Loading precincts&hellip;</li>';
+    } else if (!ids.length) {
+      listEl.innerHTML = '<li class="empty-msg">No precincts match your search.</li>';
+    } else {
+      var html = new Array(ids.length);
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        html[i] = precinctRowHtml(id);
+      }
+      listEl.innerHTML = html.join("");
+    }
+    renderPrecinctLegend();
+    applyListHeightCap(listEl);
+  }
+
+  $("precinct-search-input").addEventListener("input", function () {
+    buildPrecinctList(this.value);
+  });
+
+  // Caps a list to about 5 visible rows, scrolling internally for the rest,
+  // by measuring an actual rendered <li> rather than assuming a row height
+  // in px -- font rendering (and therefore row height) varies enough across
+  // browsers/OSes/zoom levels that a guessed constant would drift.
+  function applyListHeightCap(listEl) {
+    var row = listEl.querySelector("li[data-precinct-id], li[data-key]");
+    if (!row) return;
+    var rowHeight = row.getBoundingClientRect().height;
+    if (rowHeight > 0) listEl.style.maxHeight = (rowHeight * 5) + "px";
+  }
+  // Row height depends on font metrics, which can change on resize (e.g.
+  // phone rotation, browser zoom) -- recompute both lists' caps then too.
+  window.addEventListener("resize", function () {
+    applyListHeightCap($("precinct-list"));
+    applyListHeightCap($("address-list"));
+  });
+
+  // Shared by the precinct list row, the legend-adjacent progress readout,
+  // and the precinct panel's own title -- one format everywhere.
+  function precinctProgressText(id) {
+    var keys = precinctIndex[id].parcelKeys;
+    var walkedCount = keys.filter(currentWalked).length;
+    var total = keys.length;
+    var pct = total ? Math.round((walkedCount / total) * 100) : 0;
+    return walkedCount + "/" + total + " walked (" + pct + "%)";
+  }
+
+  function precinctRowHtml(id) {
+    var status = precinctStatusFor(id);
+    var color = PRECINCT_STATUS_COLOR_HEX[status];
+    return '<li data-precinct-id="' + escapeHtml(id) + '"' + (id === selectedPrecinctId ? ' class="active"' : "") + '>' +
+      '<span class="status-dot" style="background:' + color + '"></span>' +
+      '<span class="precinct-id">' + escapeHtml(id) + "</span>" +
+      '<span class="precinct-progress">' + escapeHtml(precinctProgressText(id)) + "</span></li>";
+  }
+
+  // Cheap partial update for the one row that changed, instead of rebuilding
+  // the whole list on every single swipe touch or status-button click.
+  function updatePrecinctListRow(id) {
+    var li = document.querySelector('#precinct-list li[data-precinct-id="' + cssEscape(id) + '"]');
+    if (li) {
+      var progressEl = li.querySelector(".precinct-progress");
+      if (progressEl) progressEl.textContent = precinctProgressText(id);
+      var dotEl = li.querySelector(".status-dot");
+      if (dotEl) dotEl.style.background = PRECINCT_STATUS_COLOR_HEX[precinctStatusFor(id)];
+    }
+    updatePrecinctPanelTitle(id);
+  }
+
+  // Keeps the open precinct panel's own title (which also shows its
+  // walked count, same format as the list row) live during swiping --
+  // a no-op if this isn't the currently-open precinct.
+  function updatePrecinctPanelTitle(id) {
+    if (id !== openPrecinctId) return;
+    $("precinct-panel-title").textContent = "Precinct " + id + " — " + precinctProgressText(id);
+  }
+
+  function highlightPrecinctListItem(id) {
+    var activeLi = null;
+    document.querySelectorAll("#precinct-list li").forEach(function (li) {
+      var isActive = !!(id && li.dataset.precinctId === id);
+      li.classList.toggle("active", isActive);
+      if (isActive) activeLi = li;
+    });
+    // Selecting a precinct -- whether by clicking it on the map or clicking
+    // its row in this list -- scrolls the list so that row lands in the
+    // middle of the visible area, instead of merely scrolling the minimum
+    // needed to bring it into view.
+    if (activeLi) activeLi.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function renderPrecinctLegend() {
+    var counts = { "Not Yet Printed": 0, "Printed": 0, "Partially Walked": 0, "Completed": 0 };
+    var total = 0;
+    Object.keys(precinctIndex).forEach(function (id) {
+      var status = precinctStatusFor(id);
+      if (counts.hasOwnProperty(status)) counts[status]++;
+      total++;
+    });
+    Object.keys(counts).forEach(function (status) {
+      var el = $("legend-count-" + PRECINCT_LEGEND_ID[status]);
+      if (el) {
+        var pct = total ? Math.round((counts[status] / total) * 100) : 0;
+        el.textContent = counts[status] + " (" + pct + "%)";
+      }
+    });
+  }
+
+  $("precinct-list").addEventListener("click", function (e) {
+    var li = e.target.closest("li[data-precinct-id]");
+    if (li) selectPrecinct(li.dataset.precinctId);
+  });
+
+  // ================== ADDRESS LIST (navigation only -- find & zoom to a house) ==================
+  function buildAddressList(filterText) {
+    var listEl = $("address-list");
+    var keys = Object.keys(parcelIndex);
+    var addresses = keys.map(function (k) { return parcelIndex[k].addressExact; });
+    addresses.sort(function (a, b) { return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }); });
+
+    var q = (filterText || "").trim().toLowerCase();
+    if (q) addresses = addresses.filter(function (a) { return a.toLowerCase().indexOf(q) !== -1; });
+
+    if (!addresses.length) {
+      listEl.innerHTML = '<li class="empty-msg">No addresses match your search.</li>';
+    } else {
+      // Build one HTML string and set it in a single pass -- with datasets
+      // that run into the thousands, appendChild-per-row is noticeably
+      // slower than a single innerHTML assignment.
+      var html = new Array(addresses.length);
+      for (var i = 0; i < addresses.length; i++) {
+        var addr = addresses[i];
+        var key = keyFor(addr);
+        var dotColor = currentWalked(key) ? WALKED_COLOR_HEX : "transparent";
+        html[i] = '<li data-key="' + escapeHtml(key) + '"' + (key === selectedAddressKey ? ' class="active"' : "") + '>' +
+          '<span class="status-dot" style="background:' + dotColor + '"></span>' +
+          "<span>" + escapeHtml(addr) + "</span></li>";
+      }
+      listEl.innerHTML = html.join("");
+    }
+    $("count-footer").textContent = keys.length + " address" + (keys.length === 1 ? "" : "es") + (q ? " \u2022 " + addresses.length + " match" + (addresses.length === 1 ? "" : "es") : "");
+    applyListHeightCap(listEl);
+  }
+
+  // Event delegation: one listener for the whole list instead of one per
+  // row, which matters once the list has thousands of rows.
+  $("address-list").addEventListener("click", function (e) {
+    var li = e.target.closest("li[data-key]");
+    if (li) selectParcel(li.dataset.key, { fromList: true });
+  });
+
+  $("search-input").addEventListener("input", function () {
+    buildAddressList(this.value);
+  });
+
+  // ================== ADDRESS SELECTION (find & zoom, no dialog) ==================
+  function selectParcel(key, opts) {
+    opts = opts || {};
+    var entry = parcelIndex[key];
+    if (!entry) return;
+
+    var previousKey = selectedAddressKey;
+    selectedAddressKey = key;
+
+    // Cheap, purely-DOM feedback first: the list highlight must appear the
+    // instant the user taps, not after any map or style work.
+    highlightListItem(key);
+
+    if (!opts.fromList) {
+      // Selection triggered by clicking the map shape itself: make sure the
+      // list scrolls to it too.
+      var li = document.querySelector('#address-list li[data-key="' + cssEscape(key) + '"]');
+      if (li) li.scrollIntoView({ block: "nearest" });
+    }
+
+    // Restyle only the two affected addresses (old selection + new one)
+    // instead of the whole parcel layer.
+    if (previousKey && previousKey !== key) restyleEntry(previousKey);
+    restyleEntry(key);
+
+    // Zoom into the neighborhood around the selected parcel, whichever way
+    // it was selected -- never zooms back out, just in and/or recenters.
+    try {
+      var b = groupBounds(entry);
+      if (b && b.isValid()) {
+        var targetZoom = Math.max(map.getZoom(), getNeighborhoodZoom());
+        map.flyTo(b.getCenter(), targetZoom, { duration: 0.6 });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function groupBounds(entry) {
+    var group = L.featureGroup(entry.layers);
+    return group.getBounds();
+  }
+
+  function deselectParcel() {
+    var previousKey = selectedAddressKey;
+    selectedAddressKey = null;
+    highlightListItem(null);
+    if (previousKey) restyleEntry(previousKey);
+  }
+
+  function highlightListItem(key) {
+    document.querySelectorAll("#address-list li").forEach(function (li) {
+      li.classList.toggle("active", key && li.dataset.key === key);
+    });
+  }
+
+  // ================== PRECINCT PANEL ==================
+  function openPrecinctPanel(id) {
+    // Closing a different, previously-open precinct's panel now happens
+    // synchronously in selectPrecinct(), immediately on click -- not here --
+    // since this function itself is deferred until the fly-to-precinct
+    // animation finishes (see zoomToFitPrecinct's onDone callback) and
+    // leaving that close-check here would leave the stale panel on screen
+    // for the whole flight instead.
+    openPrecinctId = id;
+    pendingWalked = {};
+    walkArmed = false;
+    $("precinct-walk-toggle").checked = false;
+    setWalkArmed(false);
+
+    var existing = precinctStatusData[id];
+    pendingStatus = (existing && existing.status) || DEFAULT_PRECINCT_STATUS;
+    pendingCompletedDate = (existing && existing.completedDate) || "";
+    $("precinct-completed-date").value = pendingCompletedDate;
+    // Notes don't affect the map, so -- like completedDate above -- there's
+    // no need for a dedicated pending* variable: the textarea's own value is
+    // read directly by the Save handler below.
+    $("precinct-notes").value = (existing && existing.notes) || "";
+    $("precinct-meta").textContent = existing && existing.updatedAt ? lastUpdatedText(existing) : "";
+
+    updatePrecinctPanelTitle(id);
+    updatePrecinctStatusButtons();
+    $("precinct-panel").hidden = false;
+    positionPrecinctPanel(id);
+    map.on("moveend zoomend", repositionOpenPanel);
+  }
+
+  function lastUpdatedText(entry) {
+    var when = new Date(entry.updatedAt);
+    var whenText = isNaN(when.getTime()) ? entry.updatedAt : when.toLocaleString();
+    return "Last updated " + whenText + (entry.updatedBy ? " by " + entry.updatedBy : "");
+  }
+
+  function repositionOpenPanel() {
+    if (openPrecinctId) positionPrecinctPanel(openPrecinctId);
+  }
+
+  // Preferred: to the left of the precinct's on-screen shape. Secondary:
+  // above it. Falls back to clamping within the viewport if neither fits.
+  function positionPrecinctPanel(id) {
+    var panel = $("precinct-panel");
+    var p = precinctIndex[id];
+    if (!p) return;
+    var mapEl = $("map");
+    var mapRect = mapEl.getBoundingClientRect();
+    var bounds = p.layer.getBounds();
+    var nw = map.latLngToContainerPoint(bounds.getNorthWest());
+    var se = map.latLngToContainerPoint(bounds.getSouthEast());
+    var box = {
+      left: mapRect.left + Math.min(nw.x, se.x),
+      right: mapRect.left + Math.max(nw.x, se.x),
+      top: mapRect.top + Math.min(nw.y, se.y),
+      bottom: mapRect.top + Math.max(nw.y, se.y)
+    };
+
+    var pw = panel.offsetWidth || 300;
+    var ph = panel.offsetHeight || 320;
+    var gap = 14;
+    var minX = 8, minY = 8;
+    var maxX = window.innerWidth - pw - 8;
+    var maxY = window.innerHeight - ph - 8;
+
+    var left = { x: box.left - gap - pw, y: (box.top + box.bottom) / 2 - ph / 2 };
+    var above = { x: (box.left + box.right) / 2 - pw / 2, y: box.top - gap - ph };
+
+    var pick = (left.x >= minX) ? left : (above.y >= minY ? above : left);
+
+    panel.style.left = Math.max(minX, Math.min(pick.x, maxX)) + "px";
+    panel.style.top = Math.max(minY, Math.min(pick.y, maxY)) + "px";
+  }
+
+  // Closing the precinct panel (Cancel or Save) backs the map out one zoom
+  // level from wherever zoomToFitPrecinct() flew it in to -- so after you're
+  // done with a precinct, you can immediately see more of what's around it
+  // instead of staying zoomed all the way in. Not used when the panel is
+  // simply switching to a *different* precinct (see openPrecinctPanel),
+  // since that flies to a new set of bounds right afterward anyway.
+  function zoomOutAfterPrecinctClose() {
+    if (!map) return;
+    try {
+      map.setZoom(Math.max(map.getZoom() - 1, map.getMinZoom()), { animate: true });
+    } catch (e) { /* ignore */ }
+  }
+
+  // opts:
+  //   zoomOut          -- back the map out a level after closing (Cancel/Save/Escape)
+  //   keepSelectionState -- skip clearing selectedPrecinctId/the glow highlight/the
+  //                         list's "active" row. Used only when openPrecinctPanel()
+  //                         is closing the PREVIOUS precinct because the panel is
+  //                         switching straight to a new one -- selectPrecinct()
+  //                         already applied the new precinct's selection state
+  //                         just before this runs, and clearing it here would
+  //                         wipe that back out from under it.
+  function closePrecinctPanel(discard, opts) {
+    opts = opts || {};
+    if (!openPrecinctId) return;
+    var id = openPrecinctId;
+    if (discard && Object.keys(pendingWalked).length) {
+      var keys = Object.keys(pendingWalked);
+      pendingWalked = {};
+      keys.forEach(restyleEntry);
+      updatePrecinctListRow(id);
+      buildAddressList($("search-input").value);
+    }
+    openPrecinctId = null;
+    pendingWalked = {};
+    walkArmed = false;
+    setWalkArmed(false);
+    map.off("moveend zoomend", repositionOpenPanel);
+    $("precinct-panel").hidden = true;
+    if (!opts.keepSelectionState) {
+      selectedPrecinctId = null;
+      updateSelectedPrecinctHighlight(null);
+      highlightPrecinctListItem(null);
+      restylePrecinctParcels(id); // turn this precinct's parcel outlines back off
+      // Also turn its parcels' labels back off right away -- same reasoning
+      // as the immediate call in selectPrecinct(): the zoom-out below may
+      // not actually change the zoom (e.g. already at minZoom), so it can't
+      // always be relied on to trigger this via zoomend.
+      updateVisibleParcels();
+    }
+    restylePrecinct(id);
+    // Refresh the list row + legend now that openPrecinctId is cleared, so
+    // precinctStatusFor(id) resolves back to the committed status (matters
+    // whether this was a Save -- new committed value -- or a Cancel/Escape
+    // discarding a previewed status change).
+    updatePrecinctListRow(id);
+    renderPrecinctLegend();
+    if (opts.zoomOut) zoomOutAfterPrecinctClose();
+  }
+
+  function updatePrecinctStatusButtons() {
+    document.querySelectorAll(".precinct-status-btn").forEach(function (btn) {
+      btn.classList.toggle("active", btn.dataset.status === pendingStatus);
+    });
+    $("precinct-completed-date-field").hidden = pendingStatus !== "Completed";
+  }
+
+  document.querySelectorAll(".precinct-status-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      pendingStatus = btn.dataset.status;
+      updatePrecinctStatusButtons();
+      // Preview the chosen status immediately -- on the map, in its list
+      // row's dot, and in the legend counts -- rather than waiting for Save.
+      // (precinctStatusFor() only prefers pendingStatus for openPrecinctId,
+      // so this has no effect on any other precinct.)
+      restylePrecinct(openPrecinctId);
+      updatePrecinctListRow(openPrecinctId);
+      renderPrecinctLegend();
+      // "Clicking any of the precinct buttons turns off the parcel radio btn."
+      if (walkArmed) {
+        $("precinct-walk-toggle").checked = false;
+        walkArmed = false;
+        setWalkArmed(false);
+      }
+    });
+  });
+
+  $("precinct-walk-toggle").addEventListener("change", function () {
+    walkArmed = this.checked;
+    setWalkArmed(walkArmed);
+  });
+
+  function setWalkArmed(armed) {
+    $("map").classList.toggle("walk-armed", armed);
+    if (armed) {
+      map.dragging.disable();
+      // Leaflet's touch/tap handler (active whenever the browser reports
+      // touch support -- true for a lot of laptops, not just phones) fires
+      // its own synthetic "click" on pointerup independently of the native
+      // mouse click our own preventDefault() suppresses. Without disabling
+      // it too, a swipe that starts on a precinct's own polygon (which is
+      // most of the time, since parcels sit inside it) gets read as a tap
+      // and re-opens/resets the panel mid-swipe, silently discarding
+      // whatever was just painted.
+      if (map.tap) map.tap.disable();
+    } else {
+      map.dragging.enable();
+      if (map.tap) map.tap.enable();
+    }
+    // Arming/disarming changes precinctStyle()'s output (see colorSuppressed
+    // above) for the open precinct -- restyle it immediately either way.
+    if (openPrecinctId) restylePrecinct(openPrecinctId);
+  }
+
+  $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true, { zoomOut: true }); });
+
+  $("precinct-save").addEventListener("click", async function () {
+    if (!openPrecinctId) return;
+    var id = openPrecinctId;
+    var status = pendingStatus;
+    var completedDate = status === "Completed" ? $("precinct-completed-date").value : "";
+    var notes = $("precinct-notes").value.trim();
+    var walkedChanges = Object.keys(pendingWalked).map(function (key) {
+      return { key: key, address: parcelIndex[key].addressExact, walked: pendingWalked[key] };
+    });
+
+    var saveBtn = this;
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving\u2026";
+    try {
+      var nowIso = new Date().toISOString();
+      if (DEMO_MODE) {
+        precinctStatusData[id] = { status: status, completedDate: completedDate, notes: notes, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        walkedChanges.forEach(function (c) {
+          parcelWalkedData[c.key] = { walked: c.walked, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        });
+      } else {
+        var res = await apiPost({
+          action: "saveState",
+          precinctId: id,
+          status: status,
+          completedDate: completedDate,
+          notes: notes,
+          walked: walkedChanges.map(function (c) { return { address: c.address, walked: c.walked }; }),
+          username: currentUser.username
+        });
+        if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
+        precinctStatusData[id] = { status: status, completedDate: completedDate, notes: notes, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        walkedChanges.forEach(function (c) {
+          parcelWalkedData[c.key] = { walked: c.walked, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        });
+      }
+      pendingWalked = {};
+      closePrecinctPanel(false, { zoomOut: true });
+      buildPrecinctList($("precinct-search-input").value);
+      buildAddressList($("search-input").value);
+    } catch (e) {
+      $("precinct-meta").textContent = "Could not save: " + (e.message || e);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true, { zoomOut: true });
+  });
+
+  // ================== SWIPE TO MARK WALKED ==================
+  // Only active while a precinct's panel is open AND its "Walked" checkbox
+  // is on. Scoped to that precinct's own parcels (not the whole map), and
+  // toggles each parcel at most once per continuous swipe stroke.
+  function setupSwipeToWalk() {
+    var mapEl = $("map");
+
+    mapEl.addEventListener("pointerdown", function (e) {
+      if (!walkArmed || !openPrecinctId) return;
+      swiping = true;
+      swipeTouchedThisStroke = {};
+      paintAtPoint(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    mapEl.addEventListener("pointermove", function (e) {
+      if (!swiping) return;
+      paintAtPoint(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    window.addEventListener("pointerup", function () { swiping = false; });
+    window.addEventListener("pointercancel", function () { swiping = false; });
+  }
+
+  function paintAtPoint(clientX, clientY) {
+    var p = precinctIndex[openPrecinctId];
+    if (!p) return;
+    var mapRect = $("map").getBoundingClientRect();
+    var containerPoint = L.point(clientX - mapRect.left, clientY - mapRect.top);
+    var latlng = map.containerPointToLatLng(containerPoint);
+    var pt = turf.point([latlng.lng, latlng.lat]);
+
+    for (var i = 0; i < p.parcelKeys.length; i++) {
+      var key = p.parcelKeys[i];
+      if (swipeTouchedThisStroke[key]) continue;
+      var entry = parcelIndex[key];
+      if (!entry) continue;
+      var hit = entry.features.some(function (f) { return turf.booleanPointInPolygon(pt, f); });
+      if (hit) {
+        swipeTouchedThisStroke[key] = true;
+        toggleWalkedPending(key);
+        break; // a point can only be inside one parcel
+      }
+    }
+  }
+
+  function toggleWalkedPending(key) {
+    var next = !currentWalked(key);
+    if (next === committedWalked(key)) {
+      delete pendingWalked[key]; // swiped back to its already-saved state -- nothing pending
+    } else {
+      pendingWalked[key] = next;
+    }
+    restyleEntry(key);
+    updatePrecinctListRow(openPrecinctId);
+  }
+
+  // ================== SETTINGS PANEL ==================
+  // A hideable panel (the gear icon in the topbar) that lets an admin
+  // preview color/basemap changes live on the map, then Save them as the
+  // shared default every canvasser's browser picks up (via Code.gs's
+  // Settings sheet -- see applySettingsFromServer()/pollForUpdates()).
+  var draftSettings = null; // working copy while the panel is open; discarded on Cancel/close
+
+  function populateSettingsForm(s) {
+    $("settings-basemap").value = s.basemap;
+    $("settings-color-header-tint").value = s.colors.headerTint;
+    $("settings-color-not-printed").value = s.colors.notYetPrinted;
+    $("settings-color-printed").value = s.colors.printed;
+    $("settings-color-partially-walked").value = s.colors.partiallyWalked;
+    $("settings-color-completed").value = s.colors.completed;
+    $("settings-color-selected-border").value = s.colors.selectedBorder;
+    $("settings-color-precinct-label").value = s.colors.precinctLabel;
+    $("settings-color-unselected-outline").value = s.colors.unselectedOutline;
+    $("settings-color-walked-parcel").value = s.colors.walkedParcel;
+    $("settings-color-not-walked-parcel").value = s.colors.notWalkedParcel;
+    setPrecinctFillOpacityField(s.precinctFillOpacity);
+  }
+
+  function setPrecinctFillOpacityField(opacity) {
+    $("settings-precinct-fill-opacity").value = opacity;
+    $("settings-precinct-fill-opacity-value").textContent = Math.round(opacity * 100) + "%";
+  }
+
+  function openSettingsPanel() {
+    draftSettings = cloneSettings(currentSettings);
+    populateSettingsForm(draftSettings);
+    // Not part of draftSettings (see the SHOW_ZOOM_LEVEL_KEY comment above)
+    // -- synced into the form here instead, and takes effect immediately
+    // rather than waiting on Save/Reset.
+    $("settings-show-zoom-level").checked = showZoomLevel;
+    $("settings-status").textContent = "";
+    $("settings-panel").hidden = false;
+  }
+
+  function closeSettingsPanel(discardPreview) {
+    $("settings-panel").hidden = true;
+    // Revert any live-previewed-but-unsaved change back to what's actually
+    // committed -- same discard-on-close pattern as the precinct panel.
+    if (discardPreview) applySettings(currentSettings);
+    draftSettings = null;
+  }
+
+  $("settings-toggle-btn").addEventListener("click", function () {
+    if ($("settings-panel").hidden) openSettingsPanel(); else closeSettingsPanel(true);
+  });
+  $("settings-close").addEventListener("click", function () { closeSettingsPanel(true); });
+
+  function wireSettingsColorField(inputId, setter) {
+    $(inputId).addEventListener("input", function () {
+      setter(draftSettings.colors, this.value);
+      applySettings(draftSettings);
+    });
+  }
+  wireSettingsColorField("settings-color-header-tint", function (c, v) { c.headerTint = v; });
+  wireSettingsColorField("settings-color-not-printed", function (c, v) { c.notYetPrinted = v; });
+  wireSettingsColorField("settings-color-printed", function (c, v) { c.printed = v; });
+  wireSettingsColorField("settings-color-partially-walked", function (c, v) { c.partiallyWalked = v; });
+  wireSettingsColorField("settings-color-completed", function (c, v) { c.completed = v; });
+  wireSettingsColorField("settings-color-selected-border", function (c, v) { c.selectedBorder = v; });
+  wireSettingsColorField("settings-color-precinct-label", function (c, v) { c.precinctLabel = v; });
+  wireSettingsColorField("settings-color-unselected-outline", function (c, v) { c.unselectedOutline = v; });
+  wireSettingsColorField("settings-color-walked-parcel", function (c, v) { c.walkedParcel = v; });
+  wireSettingsColorField("settings-color-not-walked-parcel", function (c, v) { c.notWalkedParcel = v; });
+
+  $("settings-basemap").addEventListener("change", function () {
+    draftSettings.basemap = this.value;
+    applySettings(draftSettings);
+  });
+
+  // Local-only preference (see SHOW_ZOOM_LEVEL_KEY above) -- takes effect
+  // immediately and persists to localStorage right away, unlike the rest of
+  // this panel which previews into draftSettings and waits for Save.
+  $("settings-show-zoom-level").addEventListener("change", function () {
+    showZoomLevel = this.checked;
+    try { localStorage.setItem(SHOW_ZOOM_LEVEL_KEY, showZoomLevel ? "1" : "0"); } catch (e) { /* ignore */ }
+    applyShowZoomLevel();
+  });
+
+  $("settings-precinct-fill-opacity").addEventListener("input", function () {
+    draftSettings.precinctFillOpacity = parseFloat(this.value);
+    $("settings-precinct-fill-opacity-value").textContent = Math.round(draftSettings.precinctFillOpacity * 100) + "%";
+    applySettings(draftSettings);
+  });
+
+  $("settings-reset").addEventListener("click", function () {
+    draftSettings = cloneSettings(DEFAULT_SETTINGS);
+    populateSettingsForm(draftSettings);
+    applySettings(draftSettings);
+  });
+
+  $("settings-save").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+    try {
+      var nowIso = new Date().toISOString();
+      if (DEMO_MODE) {
+        currentSettings = cloneSettings(draftSettings);
+        settingsUpdatedAt = nowIso;
+      } else {
+        var res = await apiPost({ action: "saveSettings", settings: draftSettings, username: currentUser.username });
+        if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
+        currentSettings = cloneSettings(draftSettings);
+        settingsUpdatedAt = res.updatedAt || nowIso;
+      }
+      closeSettingsPanel(false); // keep the now-committed preview applied, don't revert it
+    } catch (e) {
+      $("settings-status").textContent = "Could not save: " + (e.message || e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Save";
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !$("settings-panel").hidden) closeSettingsPanel(true);
+  });
+
+  // Applies a settings object that arrived from the server (initial load,
+  // or another canvasser's save picked up by the background sync poll) --
+  // distinct from the live-preview path above in that it becomes the new
+  // committed currentSettings outright, and is skipped if the panel is
+  // open (same "don't overwrite what's being edited" rule as precinct/
+  // parcel sync) or if it's not actually newer than what's already applied.
+  function applySettingsFromServer(settings, updatedAt) {
+    if (!settings) return;
+    if (!$("settings-panel").hidden) return;
+    if (settingsUpdatedAt && updatedAt && new Date(updatedAt).getTime() <= new Date(settingsUpdatedAt).getTime()) return;
+    currentSettings = cloneSettings(settings);
+    settingsUpdatedAt = updatedAt || settingsUpdatedAt;
+    applySettings(currentSettings);
+  }
+
+  // ================== BOOT ==================
+  applySettings(currentSettings);
+  initLoginNote();
+  checkExistingSession();
+})();
+</script>
+</body>
+</html>
