@@ -2212,7 +2212,13 @@
   }
 
   // Preferred: to the left of the precinct's on-screen shape. Secondary:
-  // above it. Falls back to clamping within the viewport if neither fits.
+  // above it. For a precinct whose shape is too wide (left/right don't fit)
+  // or too tall (above/below don't fit) for either preferred side, falls
+  // back to whichever of the four sides has the most clear room -- below or
+  // right, typically -- rather than always clamping to the left edge, which
+  // used to leave the panel sitting on top of the precinct's own parcels
+  // (e.g. a wide precinct near the top of the map) with no room on the left
+  // or above.
   function positionPrecinctPanel(id) {
     var panel = $("precinct-panel");
     var p = precinctIndex[id];
@@ -2236,10 +2242,25 @@
     var maxX = window.innerWidth - pw - 8;
     var maxY = window.innerHeight - ph - 8;
 
-    var left = { x: box.left - gap - pw, y: (box.top + box.bottom) / 2 - ph / 2 };
-    var above = { x: (box.left + box.right) / 2 - pw / 2, y: box.top - gap - ph };
+    var candidates = [
+      { side: "left", x: box.left - gap - pw, y: (box.top + box.bottom) / 2 - ph / 2, avail: box.left - mapRect.left, need: pw + gap },
+      { side: "above", x: (box.left + box.right) / 2 - pw / 2, y: box.top - gap - ph, avail: box.top - mapRect.top, need: ph + gap },
+      { side: "right", x: box.right + gap, y: (box.top + box.bottom) / 2 - ph / 2, avail: (mapRect.right) - box.right, need: pw + gap },
+      { side: "below", x: (box.left + box.right) / 2 - pw / 2, y: box.bottom + gap, avail: (mapRect.bottom) - box.bottom, need: ph + gap }
+    ];
 
-    var pick = (left.x >= minX) ? left : (above.y >= minY ? above : left);
+    var pick = null;
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].avail >= candidates[i].need) { pick = candidates[i]; break; }
+    }
+    if (!pick) {
+      // Nothing fits without some overlap -- pick the side with the most
+      // clear room rather than always defaulting to the left.
+      pick = candidates[0];
+      for (var j = 1; j < candidates.length; j++) {
+        if (candidates[j].avail > pick.avail) pick = candidates[j];
+      }
+    }
 
     panel.style.left = Math.max(minX, Math.min(pick.x, maxX)) + "px";
     panel.style.top = Math.max(minY, Math.min(pick.y, maxY)) + "px";
