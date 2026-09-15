@@ -417,6 +417,12 @@
     text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
     white-space: nowrap;
     pointer-events: none;
+    /* Fades in/out when crossing precinctLabelsMinZoom -- see
+       updatePrecinctLabelsVisibility(). Same span-not-outer-div reasoning
+       as the parcel labels above (this outer div is Leaflet's own
+       zoom-animated element with its own unrelated transition). */
+    opacity: 1;
+    transition: opacity 150ms ease;
   }
 
   /* ---------- selected precinct glow ---------- */
@@ -1931,8 +1937,41 @@
     Object.keys(precinctIndex).forEach(function (id) {
       var marker = precinctIndex[id].labelMarker;
       if (!marker) return;
-      if (show && !marker._map) map.addLayer(marker);
-      else if (!show && marker._map) map.removeLayer(marker);
+      // Unlike parcel labels (recreated fresh every time via
+      // addNumberLabel/removeNumberLabel), each precinct label is a single
+      // long-lived marker just toggled on/off here -- so a fade-out timer
+      // can still be pending on it when a show comes back around (someone
+      // hovering right at the threshold). __removeTimer tracks that so a
+      // show cancels it instead of racing it, and a hide never double-
+      // schedules a removal on top of one already pending.
+      if (show) {
+        if (marker.__removeTimer) { clearTimeout(marker.__removeTimer); marker.__removeTimer = null; }
+        if (!marker._map) {
+          map.addLayer(marker);
+          var span = labelSpan(marker);
+          if (span) {
+            span.style.opacity = "0";
+            requestAnimationFrame(function () {
+              requestAnimationFrame(function () {
+                span.style.opacity = "1";
+              });
+            });
+          }
+        } else {
+          // Already attached (a hide's fade-out was cancelled above, or it
+          // was already fully shown) -- make sure it ends up fully visible.
+          var alreadyShownSpan = labelSpan(marker);
+          if (alreadyShownSpan) alreadyShownSpan.style.opacity = "1";
+        }
+      } else if (marker._map && !marker.__removeTimer) {
+        var fadingSpan = labelSpan(marker);
+        if (!fadingSpan) { map.removeLayer(marker); return; }
+        fadingSpan.style.opacity = "0";
+        marker.__removeTimer = setTimeout(function () {
+          marker.__removeTimer = null;
+          map.removeLayer(marker);
+        }, LABEL_FADE_MS);
+      }
     });
   }
 
