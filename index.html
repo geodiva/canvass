@@ -371,6 +371,15 @@
 
   /* ---------- parcel house-number labels ---------- */
   .parcel-number-label { background: transparent; border: none; }
+  /* Opacity-only (compositor, no layout/repaint) so fading these in/out --
+     see fadeOutAndRemove()/addNumberLabel() -- costs nothing even though it
+     runs on every zoom; there are only ever a few dozen of these on screen
+     at once regardless. Applied to the inner span, not the outer marker div
+     -- that outer div is Leaflet's own ".leaflet-zoom-animated" element,
+     which sets its own "transition: transform ..." for smooth zoom
+     repositioning, and a second "transition" shorthand here would replace
+     that rather than add to it. The span is ours alone, untouched by
+     Leaflet's CSS, so there's no collision. */
   .parcel-number-label span {
     transform: translate(-50%, -50%);
     position: relative;
@@ -381,6 +390,8 @@
     text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
     white-space: nowrap;
     pointer-events: none;
+    opacity: 1;
+    transition: opacity 150ms ease;
   }
   /* Shown for a selected precinct's parcels at whatever (often lower) zoom
      zoomToFitPrecinct settles on -- each lot is smaller on screen there
@@ -1482,29 +1493,73 @@
   // SITEADD data we already have (no external dataset needed).
   // compact -- use the smaller ".compact" label style (see the selected
   // precinct case in updateVisibleParcels above).
+  //
+  // Every show/hide fades (see the .parcel-number-label CSS transition)
+  // instead of popping in/out. entry.labelMarker itself still updates
+  // synchronously either way -- it's only the actual DOM removal that's
+  // deferred -- so anything that reads entry.labelMarker (including
+  // updateVisibleParcels() calling this again) always sees the current,
+  // logical state immediately; the fade is purely the outgoing marker's own
+  // business on its way out.
+  var LABEL_FADE_MS = 150;
+
+  // Fades/removes via the inner <span>, not the marker's own outer div --
+  // see the CSS comment above on why (that div is Leaflet's own
+  // zoom-animated element, with its own unrelated "transition" already set).
+  function labelSpan(marker) {
+    var el = marker.getElement && marker.getElement();
+    return el ? el.querySelector("span") : null;
+  }
+
+  function fadeOutAndRemove(marker) {
+    var span = labelSpan(marker);
+    if (!span) { map.removeLayer(marker); return; }
+    span.style.opacity = "0";
+    setTimeout(function () { map.removeLayer(marker); }, LABEL_FADE_MS);
+  }
+
   function addNumberLabel(entry, compact) {
     if (entry.labelMarker && entry.labelCompact === compact) return;
-    if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
+    if (entry.labelMarker) { fadeOutAndRemove(entry.labelMarker); entry.labelMarker = null; }
     var center;
     try { center = groupBounds(entry).getCenter(); } catch (e) { return; }
     entry.labelCompact = compact;
-    entry.labelMarker = L.marker(center, {
+    var marker = L.marker(center, {
       icon: L.divIcon({ className: "parcel-number-label" + (compact ? " compact" : ""), html: "<span>" + escapeHtml(entry.numberText) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
       interactive: false,
       keyboard: false
     }).addTo(map);
+    entry.labelMarker = marker;
+    var span = labelSpan(marker);
+    if (span) {
+      span.style.opacity = "0";
+      // Flip to 1 on a later frame so the browser sees two distinct commits
+      // (opacity 0, then 1) to actually transition between -- rather than
+      // forcing a synchronous layout read (e.g. "void span.offsetWidth") to
+      // get the same effect, which is fine for one label but adds up fast
+      // when updateVisibleParcels() creates dozens/hundreds of these at once
+      // (a whole precinct's worth of parcels coming into view). Two nested
+      // rAFs (not one) reliably land in a fresh frame after the opacity:0
+      // style has actually been committed, without ever forcing layout.
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          span.style.opacity = "1";
+        });
+      });
+    }
   }
 
   function removeNumberLabel(entry) {
-    if (entry.labelMarker) { map.removeLayer(entry.labelMarker); entry.labelMarker = null; }
+    if (entry.labelMarker) { fadeOutAndRemove(entry.labelMarker); entry.labelMarker = null; }
     entry.labelCompact = null;
   }
 
-  // Instantly clears every currently-shown address (parcel number) label at
-  // the start of a zoom -- see the "zoomstart" handler above for why. Only
-  // touches labels, not the parcel polygons themselves (those animate fine
-  // as part of the vector layer). The upcoming zoomend's updateVisibleParcels
-  // pass puts the correct labels back once the new zoom has settled.
+  // Clears every currently-shown address (parcel number) label -- fading
+  // them out, per the above -- at the start of a zoom; see the "zoomstart"
+  // handler above for why. Only touches labels, not the parcel polygons
+  // themselves (those animate fine as part of the vector layer). The
+  // upcoming zoomend's updateVisibleParcels pass puts the correct labels
+  // back (fading in) once the new zoom has settled.
   function hideAddressLabelsForZoom() {
     Object.keys(parcelIndex).forEach(function (key) {
       var entry = parcelIndex[key];
