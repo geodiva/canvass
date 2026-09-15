@@ -391,7 +391,7 @@
     white-space: nowrap;
     pointer-events: none;
     opacity: 1;
-    transition: opacity 150ms ease;
+    transition: opacity 300ms ease;
   }
   /* Shown for a selected precinct's parcels at whatever (often lower) zoom
      zoomToFitPrecinct settles on -- each lot is smaller on screen there
@@ -422,7 +422,7 @@
        as the parcel labels above (this outer div is Leaflet's own
        zoom-animated element with its own unrelated transition). */
     opacity: 1;
-    transition: opacity 150ms ease;
+    transition: opacity 300ms ease;
   }
 
   /* ---------- selected precinct glow ---------- */
@@ -1316,8 +1316,13 @@
     // visibly swim/jump once the zoom lands. Hiding them the instant a zoom
     // starts, then letting the existing zoomend pass (updateVisibleParcels)
     // re-add them at their correct positions/sizes once it settles, avoids
-    // that jump entirely.
+    // that jump entirely. Precinct number labels get the same treatment --
+    // even though Leaflet's own zoom-animated transform keeps a still-shown
+    // one's position technically correct throughout, having every precinct
+    // number visibly sliding across the screen during a fast zoom reads as
+    // just as cluttered, so they vanish and reappear the same way.
     map.on("zoomstart", hideAddressLabelsForZoom);
+    map.on("zoomstart", hidePrecinctLabelsForZoom);
     map.on("zoomend", updateVisibleParcels);
     map.on("moveend", updateVisibleParcels);
     map.on("zoomend", updatePrecinctLabelsVisibility);
@@ -1507,7 +1512,7 @@
   // updateVisibleParcels() calling this again) always sees the current,
   // logical state immediately; the fade is purely the outgoing marker's own
   // business on its way out.
-  var LABEL_FADE_MS = 150;
+  var LABEL_FADE_MS = 300;
 
   // Fades/removes via the inner <span>, not the marker's own outer div --
   // see the CSS comment above on why (that div is Leaflet's own
@@ -1925,6 +1930,57 @@
     // Their number labels are handled separately, gated on zoom (see above).
   }
 
+  // Precinct labels are single long-lived markers just toggled on/off
+  // (unlike parcel labels, which are recreated fresh every time via
+  // addNumberLabel/removeNumberLabel) -- so a fade-out timer can still be
+  // pending on one when a show comes back around (someone hovering right at
+  // the threshold, or a zoomstart/zoomend pair landing close together).
+  // marker.__removeTimer tracks that so a show cancels it instead of racing
+  // it, and a hide never double-schedules a removal on top of one already
+  // pending.
+  function fadeInPrecinctLabel(marker) {
+    if (marker.__removeTimer) { clearTimeout(marker.__removeTimer); marker.__removeTimer = null; }
+    if (!marker._map) {
+      map.addLayer(marker);
+      var span = labelSpan(marker);
+      if (span) {
+        span.style.opacity = "0";
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            span.style.opacity = "1";
+          });
+        });
+      }
+    } else {
+      // Already attached (a pending fade-out was just cancelled above, or it
+      // was already fully shown) -- make sure it ends up fully visible.
+      var alreadyShownSpan = labelSpan(marker);
+      if (alreadyShownSpan) alreadyShownSpan.style.opacity = "1";
+    }
+  }
+
+  function fadeOutPrecinctLabel(marker) {
+    if (!marker._map || marker.__removeTimer) return;
+    var span = labelSpan(marker);
+    if (!span) { map.removeLayer(marker); return; }
+    span.style.opacity = "0";
+    marker.__removeTimer = setTimeout(function () {
+      marker.__removeTimer = null;
+      map.removeLayer(marker);
+    }, LABEL_FADE_MS);
+  }
+
+  // Fades out every currently-shown precinct label at the start of a zoom --
+  // see the "zoomstart" handler above for why. The upcoming zoomend's
+  // updatePrecinctLabelsVisibility puts back whichever ones belong at the
+  // new zoom, fading them back in.
+  function hidePrecinctLabelsForZoom() {
+    Object.keys(precinctIndex).forEach(function (id) {
+      var marker = precinctIndex[id].labelMarker;
+      if (marker) fadeOutPrecinctLabel(marker);
+    });
+  }
+
   // Shows/hides every precinct's number label together, based on zoom --
   // there's only 69 of them (unlike the viewport-windowed parcel labels), so
   // there's no need to window these by location too, just by zoom level.
@@ -1937,41 +1993,8 @@
     Object.keys(precinctIndex).forEach(function (id) {
       var marker = precinctIndex[id].labelMarker;
       if (!marker) return;
-      // Unlike parcel labels (recreated fresh every time via
-      // addNumberLabel/removeNumberLabel), each precinct label is a single
-      // long-lived marker just toggled on/off here -- so a fade-out timer
-      // can still be pending on it when a show comes back around (someone
-      // hovering right at the threshold). __removeTimer tracks that so a
-      // show cancels it instead of racing it, and a hide never double-
-      // schedules a removal on top of one already pending.
-      if (show) {
-        if (marker.__removeTimer) { clearTimeout(marker.__removeTimer); marker.__removeTimer = null; }
-        if (!marker._map) {
-          map.addLayer(marker);
-          var span = labelSpan(marker);
-          if (span) {
-            span.style.opacity = "0";
-            requestAnimationFrame(function () {
-              requestAnimationFrame(function () {
-                span.style.opacity = "1";
-              });
-            });
-          }
-        } else {
-          // Already attached (a hide's fade-out was cancelled above, or it
-          // was already fully shown) -- make sure it ends up fully visible.
-          var alreadyShownSpan = labelSpan(marker);
-          if (alreadyShownSpan) alreadyShownSpan.style.opacity = "1";
-        }
-      } else if (marker._map && !marker.__removeTimer) {
-        var fadingSpan = labelSpan(marker);
-        if (!fadingSpan) { map.removeLayer(marker); return; }
-        fadingSpan.style.opacity = "0";
-        marker.__removeTimer = setTimeout(function () {
-          marker.__removeTimer = null;
-          map.removeLayer(marker);
-        }, LABEL_FADE_MS);
-      }
+      if (show) fadeInPrecinctLabel(marker);
+      else fadeOutPrecinctLabel(marker);
     });
   }
 
