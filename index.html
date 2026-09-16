@@ -957,7 +957,7 @@
 
   // ================== STATE ==================
   var map, boundaryLayer, parcelsLayer, precinctsLayer;
-  var parcelsVisible = false;      // parcels layer is withheld until zoomed in enough (see updateVisibleParcels)
+  var parcelsVisible = false;      // true once zoomed in enough for the full (viewport-windowed) parcels pass -- walked parcels show even below that, see updateVisibleParcels
   var parcelsMinZoom = null;       // computed once the initial city-wide view is set
   var precinctLabelsMinZoom = null; // computed once the initial city-wide view is set
   // address(lowercased) -> { addressExact, precinctId, layers: [L.Layer,...], features: [...] }
@@ -1370,9 +1370,12 @@
       buildPrecinctList();
       try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
 
-      // Parcels stay hidden until the viewer has zoomed in noticeably closer
-      // than this initial city-wide view -- 11k+ parcel outlines at a
-      // city-wide zoom is just clutter, and it's a lot to draw at once.
+      // Not-yet-walked parcels stay hidden until the viewer has zoomed in
+      // noticeably closer than this initial city-wide view -- 11k+ outlines
+      // at a city-wide zoom is just clutter, and it's a lot to draw at
+      // once. Walked ones are the exception (see updateVisibleParcels):
+      // they show right from this initial zoom, so canvassing progress
+      // across the whole city is visible at a glance without zooming in.
       // Precincts (far fewer, much larger shapes) stay visible at every zoom.
       parcelsMinZoom = map.getZoom() + CONFIG.PARCELS_MIN_ZOOM_DELTA;
       updateVisibleParcels();
@@ -1424,6 +1427,7 @@
         if (belongsToOpenPrecinct) { anySkipped = true; return; }
         parcelWalkedData[key] = { walked: pc.walked, updatedAt: pc.updatedAt, updatedBy: pc.updatedBy };
         restyleEntry(key);
+        syncParcelVisibilityIfBelowThreshold(key);
         touchedAny = true;
       });
 
@@ -1453,14 +1457,28 @@
     var zoom = map.getZoom();
 
     if (zoom < parcelsMinZoom) {
-      if (parcelsVisible) {
-        Object.keys(parcelIndex).forEach(function (key) {
-          var entry = parcelIndex[key];
-          entry.layers.forEach(function (l) { if (l._map) map.removeLayer(l); });
-          removeNumberLabel(entry);
+      parcelsVisible = false;
+      // Walked parcels are the exception to "hidden until zoomed in" --
+      // they're the whole point of a city-wide view (seeing canvassing
+      // progress at a glance from the initial zoom, right when the page
+      // loads, not just once you zoom in on one neighborhood), and there
+      // are always far fewer of them than the full 11k+ dataset, so
+      // attaching them doesn't reintroduce the clutter/perf problem that
+      // hiding everything else here is for. No viewport windowing either
+      // (unlike the padded-viewport pass below) -- the city-wide view
+      // already shows roughly the whole city at once.
+      Object.keys(parcelIndex).forEach(function (key) {
+        var entry = parcelIndex[key];
+        var show = currentWalked(key);
+        entry.layers.forEach(function (l) {
+          if (show && !l._map) map.addLayer(l);
+          else if (!show && l._map) map.removeLayer(l);
         });
-        parcelsVisible = false;
-      }
+        // House-number labels stay off at this zoom regardless (they need
+        // real street-level detail to be legible) -- only clear a stale one
+        // left over from a walked parcel that's since been un-walked.
+        if (!show) removeNumberLabel(entry);
+      });
       return;
     }
     parcelsVisible = true;
@@ -1797,6 +1815,25 @@
     if (!entry) return;
     var style = styleForKey(key);
     entry.layers.forEach(function (l) { l.setStyle(style); });
+  }
+
+  // Below parcelsMinZoom (the city-wide view), only walked parcels are
+  // attached to the map at all -- see updateVisibleParcels. A walked-status
+  // change there (a swipe, or another canvasser's update arriving via
+  // sync) needs to attach/detach that one parcel right away too, or it'd
+  // only show up on the next zoom/pan. Above that zoom the normal
+  // viewport-windowed pass already owns attachment, so this is a no-op --
+  // restyleEntry (always called alongside this) covers recoloring an
+  // already-attached parcel on its own.
+  function syncParcelVisibilityIfBelowThreshold(key) {
+    if (parcelsMinZoom === null || map.getZoom() >= parcelsMinZoom) return;
+    var entry = parcelIndex[key];
+    if (!entry) return;
+    var show = currentWalked(key);
+    entry.layers.forEach(function (l) {
+      if (show && !l._map) map.addLayer(l);
+      else if (!show && l._map) map.removeLayer(l);
+    });
   }
 
   function addParcels(parcelsGeoJson) {
@@ -2676,6 +2713,7 @@
       pendingWalked[key] = next;
     }
     restyleEntry(key);
+    syncParcelVisibilityIfBelowThreshold(key);
     updatePrecinctListRow(openPrecinctId);
   }
 
