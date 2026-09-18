@@ -51,14 +51,21 @@
     /* Per-overlay section header washes -- each sidebar section (and its
        matching row in the Layers menu's Overlays list) gets its own color
        instead of sharing --header-tint, so the two stay visually paired at a
-       glance. --tint-precincts tracks the (customizable) precinct label
-       color live from applySettings(); --tint-districts is fixed to
-       DISTRICT_BORDER_HEX, same as every other district-overlay color, since
-       that overlay has no Settings-panel customization at all. Canvass
-       progress (the address list) keeps using the original --header-tint
-       above, unscoped, as its color. */
-    --tint-precincts: rgba(0, 71, 171, 0.16);
-    --tint-districts: rgba(29, 78, 216, 0.16);
+       glance, and each other's colors -- deliberately spread across the
+       color wheel (blue / violet / teal) rather than three shades of the
+       same blue -- so the three read as clearly different at a glance.
+       Drawn noticeably darker than --header-tint above (0.40 alpha vs 0.16)
+       for the same reason. --tint-precincts tracks the (customizable)
+       precinct label color live from applySettings(); --tint-canvass tracks
+       the (customizable) header-tint color; --tint-districts is fixed to
+       DISTRICT_TINT_HEX, a teal chosen specifically to look distinct from
+       --tint-precincts' blue (the map's own district borders/glow stay
+       DISTRICT_BORDER_HEX's blue -- this is purely a sidebar/Layers-menu
+       color-coding choice). These fallbacks only show for the instant before
+       JS runs. */
+    --tint-precincts: rgba(0, 71, 171, 0.40);
+    --tint-canvass: rgba(124, 58, 237, 0.40);
+    --tint-districts: rgba(15, 118, 110, 0.40);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -237,26 +244,50 @@
     z-index: 10;
   }
 
-  /* Precinct list (top half) and Address list (bottom half) share the
-     sidebar, each independently scrollable. */
+  /* "Current clickable overlay" and "Precinct canvassing progress" stay
+     pinned at the top in normal document order, each sized to its own
+     content. Everything below them -- the three search/list sections -- is
+     grouped into .sidebar-list-stack instead (see below), which is the part
+     that packs down against the bottom of the screen. */
   .sidebar-section {
-    flex: 1 1 0;
-    min-height: 0;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     border-bottom: 1px solid var(--border);
-    /* With up to 5 sections now sharing the sidebar at once (the Overlays
-       feature can show precinct progress + precinct list + district list +
-       address list + the clickable-overlay picker all at the same time),
-       each section's equal flex share can end up shorter than a capped
-       list's own fixed row-height cap (applyListHeightCap() -- a
-       flex-shrink:0 list won't compress below that). Without this, the
-       excess visibly spilled down over whatever section came next instead
-       of staying contained -- same "don't bleed into your neighbor"
-       principle the list's own overflow-y:auto already follows, just
-       applied one level up. */
     overflow: hidden;
   }
+  /* Takes up whatever vertical space the two pinned-at-top sections above
+     don't use (flex: 1 1 auto + min-height: 0, the standard "fill the rest
+     of a flex column" pair). Its own three .sidebar-section children are
+     sized to their own content instead of stretching to fill it -- pushed
+     down flush against the bottom edge of the screen by giving the first one
+     "margin-top: auto" (below), leaving any leftover space above the topmost
+     of the three instead of splitting it into breathing room inside each
+     one. overflow-y covers the case where the visible sections' combined
+     natural height still doesn't fit (e.g. multiple overlays on at once,
+     each with a nearly-full 5-row list, on a short screen) -- this stack
+     scrolls internally rather than clipping whatever sticks out above it. */
+  .sidebar-list-stack {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  /* "margin-top: auto" (not "justify-content: flex-end" on the container
+     above) is the deliberate choice here: with flex-end, once the children's
+     combined height exceeds the container's, Chromium renders the overflow
+     bleeding out past the container's own top edge -- uncontained by its
+     overflow-y: auto, so it visually overlaps whatever sits above the stack
+     in the sidebar instead of being scrollable. An auto top margin on just
+     the first VISIBLE child (see updateSidebarSectionBorders(), which keeps
+     this class assigned as sections show/hide -- plain CSS :first-child
+     can't skip a hidden-but-still-in-the-DOM section) degrades gracefully
+     instead: it soaks up any leftover space when everything fits (same
+     bottom-anchored look), and simply collapses to 0 when it doesn't,
+     leaving the three sections to stack normally from the top of the (now
+     properly scrollable) container. */
+  .sidebar-list-stack-first-visible { margin-top: auto; }
   /* Not :last-child -- sections can be individually hidden now (see the
      Overlays checkboxes / setOverlayOn()), and a hidden one is still in the
      DOM, so ":last-child" would leave the border on whichever visible
@@ -282,15 +313,18 @@
     background: linear-gradient(180deg, var(--header-tint), transparent 85%);
   }
   .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
-  /* Voting Precincts and City council districts get their own tint instead
-     of the shared --header-tint above, so each overlay's sidebar section(s)
-     read as visually paired with that overlay's own row in the Layers menu
-     (see .layers-choice-row-precincts/-districts below). Canvass progress
-     (the address list) and the "Current clickable overlay" selector keep the
-     plain --header-tint wash. */
+  /* Voting Precincts, Canvass progress, and City council districts each get
+     their own tint instead of the shared --header-tint above, so each
+     overlay's sidebar section(s) read as visually paired with that overlay's
+     own row in the Layers menu (see .layers-choice-row-precincts/-canvass/
+     -districts below). The "Current clickable overlay" selector isn't tied
+     to one specific overlay, so it keeps the plain --header-tint wash. */
   #precinct-progress-section .sidebar-header,
   #precinct-list-section .sidebar-header {
     background: linear-gradient(180deg, var(--tint-precincts), transparent 85%);
+  }
+  #address-list-section .sidebar-header {
+    background: linear-gradient(180deg, var(--tint-canvass), transparent 85%);
   }
   #district-list-section .sidebar-header {
     background: linear-gradient(180deg, var(--tint-districts), transparent 85%);
@@ -307,14 +341,15 @@
   }
   .sidebar-search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-  /* flex: 0 0 auto (not flex: 1) is deliberate: these lists no longer grow
-     to fill their .sidebar-section -- they're capped to about 5 visible
-     rows (max-height set from JS in applyListHeightCaps(), which measures
-     an actual rendered row rather than guessing a font-dependent px value)
-     and scroll internally for the rest. Since .sidebar-section itself keeps
-     flex: 1 1 0 (three equal-height sections), whatever height a capped
-     list doesn't use is left as breathing room in that section instead of
-     one long list swallowing the whole sidebar. */
+  /* flex: 0 0 auto (not flex: 1) is deliberate: these lists don't grow to
+     fill their .sidebar-section -- they're capped to about 5 visible rows
+     (max-height set from JS in applyListHeightCaps(), which measures an
+     actual rendered row rather than guessing a font-dependent px value) and
+     scroll internally for the rest. .sidebar-section itself is also
+     flex: 0 0 auto now (content-sized, not stretched -- see
+     .sidebar-list-stack above), so a list with fewer rows than the cap just
+     makes its whole section shorter instead of leaving unused space inside
+     it. */
   #precinct-list, #district-list, #address-list {
     flex: 0 0 auto;
     overflow-y: auto;
@@ -437,12 +472,12 @@
   }
   .layers-choice-row input { accent-color: var(--select); margin: 0; }
   /* Same gradient wash (and the same three colors) as the matching sidebar
-     section header(s) -- see the #precinct-list-section/#district-list-
-     section/.sidebar-header rules above -- so each overlay's own toggle here
-     reads as visually paired with the section it turns on. Canvass progress
-     reuses the plain --header-tint, same as its sidebar section. */
+     section header(s) -- see the #precinct-list-section/#address-list-
+     section/#district-list-section/.sidebar-header rules above -- so each
+     overlay's own toggle here reads as visually paired with the section it
+     turns on. */
   .layers-choice-row-precincts { background: linear-gradient(180deg, var(--tint-precincts), transparent 85%); }
-  .layers-choice-row-canvass { background: linear-gradient(180deg, var(--header-tint), transparent 85%); }
+  .layers-choice-row-canvass { background: linear-gradient(180deg, var(--tint-canvass), transparent 85%); }
   .layers-choice-row-districts { background: linear-gradient(180deg, var(--tint-districts), transparent 85%); }
 
   .layers-menu-header {
@@ -1029,27 +1064,29 @@
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-completed)"></span><span class="legend-label">Completed</span><span class="legend-count" id="legend-count-completed">0</span></div>
       </div>
     </div>
-    <div class="sidebar-section" id="precinct-list-section">
-      <div class="sidebar-header">
-        <h2>Voting precincts</h2>
-        <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
+    <div class="sidebar-list-stack">
+      <div class="sidebar-section" id="precinct-list-section">
+        <div class="sidebar-header">
+          <h2>Voting precincts</h2>
+          <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
+        </div>
+        <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
       </div>
-      <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
-    </div>
-    <div class="sidebar-section" id="district-list-section" hidden>
-      <div class="sidebar-header">
-        <h2>City council districts</h2>
-        <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
+      <div class="sidebar-section" id="district-list-section" hidden>
+        <div class="sidebar-header">
+          <h2>City council districts</h2>
+          <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
+        </div>
+        <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
       </div>
-      <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
-    </div>
-    <div class="sidebar-section" id="address-list-section">
-      <div class="sidebar-header">
-        <h2>Address</h2>
-        <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+      <div class="sidebar-section" id="address-list-section">
+        <div class="sidebar-header">
+          <h2>Address</h2>
+          <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
+        </div>
+        <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
+        <div class="sidebar-footer" id="count-footer">&nbsp;</div>
       </div>
-      <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
-      <div class="sidebar-footer" id="count-footer">&nbsp;</div>
     </div>
   </aside>
   <div id="loading-overlay">
@@ -1374,6 +1411,14 @@
   // never mistaken for the selected-precinct glow.
   var DISTRICT_BORDER_HEX = "#1D4ED8";
   var DISTRICT_SELECTED_HEX = "#60A5FA";
+  // Used only for the districts section-header/Layers-menu-row tint (see
+  // --tint-districts) -- deliberately a different hue (teal) from
+  // DISTRICT_BORDER_HEX's blue, since that blue is already close to the
+  // Voting Precincts tint (cobalt) and the two need to read as clearly
+  // different colors, not two shades of the same one. The map's own district
+  // borders/glow stay DISTRICT_BORDER_HEX/DISTRICT_SELECTED_HEX -- this is
+  // purely a sidebar/Layers-menu color-coding choice.
+  var DISTRICT_TINT_HEX = "#0F766E";
 
   // These four are plain JS values (not CSS var() references) because
   // Leaflet's Canvas renderer draws to a <canvas> pixel buffer -- it can't
@@ -1410,13 +1455,21 @@
     root.setProperty("--precinct-label-color", c.precinctLabel);
     // Keeps the "Voting Precincts" section header (and its matching Layers-
     // menu row) tinted with whatever the precinct number-label color is set
-    // to, live -- see the --tint-precincts comment in :root above.
-    root.setProperty("--tint-precincts", hexToRgba(c.precinctLabel, HEADER_TINT_ALPHA));
+    // to, live -- see the --tint-precincts comment in :root above. Uses the
+    // darker SECTION_TINT_ALPHA (not HEADER_TINT_ALPHA) so these three
+    // overlay-specific tints read as clearly distinct colors, not a light
+    // wash that all looks about the same.
+    root.setProperty("--tint-precincts", hexToRgba(c.precinctLabel, SECTION_TINT_ALPHA));
+    // Canvass progress's own tint -- previously it just reused --header-tint
+    // directly (see the .layers-choice-row-canvass/#address-list-section
+    // comments below); it's still built from that same settings color, just
+    // at the darker SECTION_TINT_ALPHA so it's consistent with the other two.
+    root.setProperty("--tint-canvass", hexToRgba(c.headerTint, SECTION_TINT_ALPHA));
     // Fixed, not settings-driven (see the --tint-districts comment in :root
-    // above) -- set here anyway, from the same DISTRICT_BORDER_HEX constant
-    // everything else about the district overlay's color uses, so the two
-    // can never silently drift apart.
-    root.setProperty("--tint-districts", hexToRgba(DISTRICT_BORDER_HEX, HEADER_TINT_ALPHA));
+    // above) -- built from DISTRICT_TINT_HEX, a color chosen specifically to
+    // look distinct from --tint-precincts' blue (not DISTRICT_BORDER_HEX,
+    // which the map's own district borders/glow still use).
+    root.setProperty("--tint-districts", hexToRgba(DISTRICT_TINT_HEX, SECTION_TINT_ALPHA));
     root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
     root.setProperty("--walked-color", c.walkedParcel);
     root.setProperty("--parcel-fill", c.notWalkedParcel);
@@ -1477,6 +1530,13 @@
   // Fixed alpha the header-tint gradient (topbar + sidebar section headings)
   // is drawn at -- the Settings panel only lets you pick the color itself.
   var HEADER_TINT_ALPHA = 0.16;
+  // A separate, noticeably darker alpha for the three overlay-specific
+  // section-header/Layers-menu-row tints (--tint-precincts/-canvass/
+  // -districts) -- these exist specifically so each overlay's color reads as
+  // distinct at a glance, which the topbar's original light 0.16 wash was too
+  // subtle for. The topbar itself keeps using HEADER_TINT_ALPHA above,
+  // unchanged.
+  var SECTION_TINT_ALPHA = 0.40;
   function hexToRgba(hex, alpha) {
     var m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
     if (!m) return hex; // not a plain #rrggbb -- hand back whatever we got rather than guess
@@ -2274,6 +2334,17 @@
     var sections = document.querySelectorAll(".sidebar-section:not([hidden])");
     sections.forEach(function (el, i) {
       el.classList.toggle("sidebar-section-last", i === sections.length - 1);
+    });
+    // The bottom-anchoring "margin-top: auto" (see .sidebar-list-stack-
+    // first-visible in the CSS) needs to land on whichever of the three
+    // search/list sections is currently first in visible order -- plain CSS
+    // ":first-child" can't tell a hidden section (still present in the DOM,
+    // just display:none -- see the Overlays checkboxes) apart from a visible
+    // one, so this picks it in JS instead, the same way sidebar-section-last
+    // above already has to.
+    var stackSections = document.querySelectorAll(".sidebar-list-stack > .sidebar-section:not([hidden])");
+    stackSections.forEach(function (el, i) {
+      el.classList.toggle("sidebar-list-stack-first-visible", i === 0);
     });
   }
 
