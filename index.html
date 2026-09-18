@@ -47,6 +47,18 @@
        as an inline style with the settings-panel color (default or saved)
        converted to rgba(), so it's also live-configurable from Settings. */
     --header-tint: rgba(124, 58, 237, 0.16);
+
+    /* Per-overlay section header washes -- each sidebar section (and its
+       matching row in the Layers menu's Overlays list) gets its own color
+       instead of sharing --header-tint, so the two stay visually paired at a
+       glance. --tint-precincts tracks the (customizable) precinct label
+       color live from applySettings(); --tint-districts is fixed to
+       DISTRICT_BORDER_HEX, same as every other district-overlay color, since
+       that overlay has no Settings-panel customization at all. Canvass
+       progress (the address list) keeps using the original --header-tint
+       above, unscoped, as its color. */
+    --tint-precincts: rgba(0, 71, 171, 0.16);
+    --tint-districts: rgba(29, 78, 216, 0.16);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -270,6 +282,19 @@
     background: linear-gradient(180deg, var(--header-tint), transparent 85%);
   }
   .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
+  /* Voting Precincts and City council districts get their own tint instead
+     of the shared --header-tint above, so each overlay's sidebar section(s)
+     read as visually paired with that overlay's own row in the Layers menu
+     (see .layers-choice-row-precincts/-districts below). Canvass progress
+     (the address list) and the "Current clickable overlay" selector keep the
+     plain --header-tint wash. */
+  #precinct-progress-section .sidebar-header,
+  #precinct-list-section .sidebar-header {
+    background: linear-gradient(180deg, var(--tint-precincts), transparent 85%);
+  }
+  #district-list-section .sidebar-header {
+    background: linear-gradient(180deg, var(--tint-districts), transparent 85%);
+  }
 
   .sidebar-search-input {
     width: 100%;
@@ -404,11 +429,60 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 0;
+    padding: 3px 6px;
+    margin: 1px -6px;
+    border-radius: 5px;
     cursor: pointer;
     white-space: nowrap;
   }
   .layers-choice-row input { accent-color: var(--select); margin: 0; }
+  /* Same gradient wash (and the same three colors) as the matching sidebar
+     section header(s) -- see the #precinct-list-section/#district-list-
+     section/.sidebar-header rules above -- so each overlay's own toggle here
+     reads as visually paired with the section it turns on. Canvass progress
+     reuses the plain --header-tint, same as its sidebar section. */
+  .layers-choice-row-precincts { background: linear-gradient(180deg, var(--tint-precincts), transparent 85%); }
+  .layers-choice-row-canvass { background: linear-gradient(180deg, var(--header-tint), transparent 85%); }
+  .layers-choice-row-districts { background: linear-gradient(180deg, var(--tint-districts), transparent 85%); }
+
+  .layers-menu-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: -8px -10px 8px;
+    padding: 6px 8px 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .layers-menu-title { font-weight: 700; font-size: 0.8rem; }
+  .layers-menu-close {
+    background: none;
+    border: none;
+    font-size: 1.15rem;
+    line-height: 1;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0 2px;
+  }
+  .layers-menu-close:hover { color: var(--ink); }
+
+  /* Collapsed state: the close button above shrinks the whole control down
+     to just this one small icon button (matching the locate/home controls'
+     own size and hover style) instead of removing the menu outright -- one
+     click either direction toggles between the two. */
+  .layers-menu-reopen-link {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    color: var(--ink);
+  }
+  .layers-menu-reopen-link:hover { background: var(--paper); }
+  .layers-menu.layers-menu-collapsed { padding: 0; }
+  .layers-menu.layers-menu-collapsed .layers-menu-header,
+  .layers-menu.layers-menu-collapsed .layers-menu-body { display: none; }
+  .layers-menu.layers-menu-collapsed .layers-menu-reopen-link { display: flex; }
 
   /* ---------- my-location control ---------- */
   .locate-control-link {
@@ -422,6 +496,19 @@
   }
   .locate-control-link:hover { background: var(--paper); }
   .locate-control-link.active { color: var(--select); }
+
+  /* ---------- home (reset view) control ---------- */
+  .home-control-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .home-control-link:hover { background: var(--paper); }
+
   .user-location-marker { background: transparent; border: none; }
   .user-location-dot {
     width: 14px;
@@ -488,6 +575,26 @@
     transition: opacity 300ms ease;
   }
 
+  /* ---------- city council district labels ---------- */
+  .district-number-label { background: transparent; border: none; }
+  .district-number-label span {
+    transform: translate(-50%, -50%);
+    position: relative;
+    display: inline-block;
+    font-size: 15px;
+    font-weight: 800;
+    /* Matches DISTRICT_BORDER_HEX in the JS below -- districts
+       are a fixed reference overlay with no per-item styling (no Settings
+       panel color for these, unlike the precinct label color above), so
+       this is a plain hardcoded hex rather than a CSS var. Always this
+       color regardless of selection, same as the precinct number labels
+       staying cobalt blue whether or not their precinct is selected. */
+    color: #1D4ED8;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
   /* ---------- selected precinct glow ---------- */
   /* A separate SVG-rendered outline-only layer (see updateSelectedPrecinctHighlight)
      drawn just for the currently-selected precinct -- the shared Canvas
@@ -495,6 +602,16 @@
      filters, but a lone SVG path can. */
   .precinct-selected-highlight {
     filter: drop-shadow(0 0 3px var(--precinct-selected-border)) drop-shadow(0 0 7px var(--precinct-selected-border));
+    pointer-events: none;
+  }
+
+  /* ---------- selected district glow ---------- */
+  /* Same technique and same drop-shadow parameters as the selected precinct
+     glow above (see updateSelectedDistrictHighlight) -- just colored with
+     DISTRICT_SELECTED_HEX from the JS below instead of the precinct glow's
+     Settings-panel color, since districts have no customizable color. */
+  .district-selected-highlight {
+    filter: drop-shadow(0 0 3px #60A5FA) drop-shadow(0 0 7px #60A5FA);
     pointer-events: none;
   }
 
@@ -586,6 +703,30 @@
   .precinct-notes-textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
   #precinct-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
+  /* ---------- district panel metadata ---------- */
+  #district-meta { margin-top: 4px; }
+  .district-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 7px 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .district-meta-row:first-child { border-top: none; }
+  .district-meta-row .field-label { margin-bottom: 0; white-space: nowrap; }
+  .district-meta-row span:last-child, .district-meta-row a { text-align: right; color: var(--ink); }
+  .district-meta-photo { margin-bottom: 6px; }
+  .district-meta-photo img {
+    display: block;
+    width: 100%;
+    max-height: 160px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
 
   .dialog-actions {
     display: flex;
@@ -695,6 +836,33 @@
     border-radius: 6px;
     background: none;
     cursor: pointer;
+  }
+  .settings-color-row-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .settings-transparent-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.78rem;
+    color: var(--ink-muted, var(--ink));
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .settings-transparent-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+  }
+  /* A checked "Transparent" toggle makes the color input itself moot -- the
+     picker is dimmed and disabled rather than hidden, so its last-picked
+     color is still visible (and ready to reuse) if transparency is turned
+     back off. */
+  .settings-color-row input[type="color"]:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
   .settings-slider-row {
     display: flex;
@@ -929,6 +1097,18 @@
     </div>
   </div>
 
+  <!-- ============ DISTRICT PANEL (floating, tracks the selected district) ============ -->
+  <!-- Read-only -- just the district's own geojson properties, no
+       editing/saving like the precinct panel above, so there's only a
+       Cancel button. -->
+  <div class="precinct-panel" id="district-panel" hidden>
+    <h3 id="district-panel-title">District</h3>
+    <div id="district-meta"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="district-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+
   <!-- ============ SETTINGS PANEL (hideable; colors + default basemap) ============ -->
   <div class="settings-panel" id="settings-panel" hidden>
     <div class="settings-panel-header">
@@ -977,8 +1157,20 @@
 
     <div class="settings-section">
       <span class="field-label">Parcel Colors</span>
-      <div class="settings-color-row"><span>Walked</span><input type="color" id="settings-color-walked-parcel"></div>
-      <div class="settings-color-row"><span>Not walked</span><input type="color" id="settings-color-not-walked-parcel"></div>
+      <div class="settings-color-row">
+        <span>Walked</span>
+        <div class="settings-color-row-controls">
+          <label class="settings-transparent-toggle"><input type="checkbox" id="settings-transparent-walked-parcel"> Transparent</label>
+          <input type="color" id="settings-color-walked-parcel">
+        </div>
+      </div>
+      <div class="settings-color-row">
+        <span>Not walked</span>
+        <div class="settings-color-row-controls">
+          <label class="settings-transparent-toggle"><input type="checkbox" id="settings-transparent-not-walked-parcel"> Transparent</label>
+          <input type="color" id="settings-color-not-walked-parcel">
+        </div>
+      </div>
     </div>
 
     <div id="settings-status"></div>
@@ -1038,6 +1230,10 @@
   var map, boundaryLayer, parcelsLayer, precinctsLayer, districtsLayer;
   var parcelsVisible = false;      // true once zoomed in enough for the full (viewport-windowed) parcels pass -- walked parcels show even below that, see updateVisibleParcels
   var parcelsMinZoom = null;       // computed once the initial city-wide view is set
+  // The fitted city-wide view computed once at boot -- cached so the Home
+  // control (addHomeControl()) can fly back to it later. Null until boot's
+  // own fitBounds() call sets it.
+  var initialCityBounds = null;
   var precinctLabelsMinZoom = null; // computed once the initial city-wide view is set
   // address(lowercased) -> { addressExact, precinctId, layers: [L.Layer,...], features: [...] }
   // (grouped because a small number of addresses cover more than one parcel,
@@ -1054,6 +1250,12 @@
   var selectedAddressKey = null;
   var selectedPrecinctId = null;
   var selectedDistrictId = null;
+  // Which district's metadata panel is currently open -- distinct from
+  // selectedDistrictId (the map/list highlight) the same way openPrecinctId
+  // is distinct from selectedPrecinctId: selection can briefly outlive the
+  // panel (e.g. mid-flight, right after a click, before zoomToFitDistrict's
+  // onDone opens it) or the panel can be closed while the highlight stays.
+  var openDistrictId = null;
   var currentUser = null;      // { username, displayName, role } -- role is "editor" or "viewer"
 
   // ---- overlays (layers menu) ----
@@ -1126,6 +1328,14 @@
       unselectedOutline: "#1A1A1A",
       walkedParcel: "#14181D",
       notWalkedParcel: "#4A6577",
+      // "Transparent" wins over the hex color above when true -- <input
+      // type="color"> has no alpha channel, so "no fill at all" needs its
+      // own flag rather than a color value. Not-walked parcels default to
+      // transparent so an un-canvassed precinct's parcels read as empty
+      // ground rather than a wash of color; walked parcels default to
+      // their solid color so progress still shows up clearly.
+      walkedParcelTransparent: false,
+      notWalkedParcelTransparent: true,
       headerTint: "#7C3AED"   // violet -- the gradient wash behind the topbar row and each sidebar section heading
     }
   };
@@ -1141,7 +1351,13 @@
     }
     if (override && override.colors) {
       Object.keys(merged.colors).forEach(function (k) {
-        if (override.colors[k]) merged.colors[k] = override.colors[k];
+        var v = override.colors[k];
+        // Booleans (the *Transparent flags) need their own check -- `false`
+        // is a legitimate saved value but is falsy, so the plain truthy
+        // check below (right for hex color strings) would silently drop it
+        // and fall back to the default every time.
+        if (typeof v === "boolean") merged.colors[k] = v;
+        else if (v) merged.colors[k] = v;
       });
     }
     return merged;
@@ -1165,6 +1381,8 @@
   // applySettings() below keeps both in sync from one settings object.
   var WALKED_COLOR_HEX = DEFAULT_SETTINGS.colors.walkedParcel;
   var PARCEL_FILL_HEX = DEFAULT_SETTINGS.colors.notWalkedParcel;
+  var WALKED_PARCEL_TRANSPARENT = DEFAULT_SETTINGS.colors.walkedParcelTransparent;
+  var NOT_WALKED_PARCEL_TRANSPARENT = DEFAULT_SETTINGS.colors.notWalkedParcelTransparent;
   var SELECTED_BORDER_HEX = DEFAULT_SETTINGS.colors.selectedBorder;
   var UNSELECTED_OUTLINE_HEX = DEFAULT_SETTINGS.colors.unselectedOutline;
   var PRECINCT_FILL_OPACITY = DEFAULT_SETTINGS.precinctFillOpacity;
@@ -1190,6 +1408,15 @@
     root.setProperty("--precinct-completed", c.completed);
     root.setProperty("--precinct-selected-border", c.selectedBorder);
     root.setProperty("--precinct-label-color", c.precinctLabel);
+    // Keeps the "Voting Precincts" section header (and its matching Layers-
+    // menu row) tinted with whatever the precinct number-label color is set
+    // to, live -- see the --tint-precincts comment in :root above.
+    root.setProperty("--tint-precincts", hexToRgba(c.precinctLabel, HEADER_TINT_ALPHA));
+    // Fixed, not settings-driven (see the --tint-districts comment in :root
+    // above) -- set here anyway, from the same DISTRICT_BORDER_HEX constant
+    // everything else about the district overlay's color uses, so the two
+    // can never silently drift apart.
+    root.setProperty("--tint-districts", hexToRgba(DISTRICT_BORDER_HEX, HEADER_TINT_ALPHA));
     root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
     root.setProperty("--walked-color", c.walkedParcel);
     root.setProperty("--parcel-fill", c.notWalkedParcel);
@@ -1201,6 +1428,8 @@
 
     WALKED_COLOR_HEX = c.walkedParcel;
     PARCEL_FILL_HEX = c.notWalkedParcel;
+    WALKED_PARCEL_TRANSPARENT = !!c.walkedParcelTransparent;
+    NOT_WALKED_PARCEL_TRANSPARENT = !!c.notWalkedParcelTransparent;
     SELECTED_BORDER_HEX = c.selectedBorder;
     UNSELECTED_OUTLINE_HEX = c.unselectedOutline;
     PRECINCT_FILL_OPACITY = (typeof settings.precinctFillOpacity === "number") ? settings.precinctFillOpacity : DEFAULT_SETTINGS.precinctFillOpacity;
@@ -1414,6 +1643,7 @@
 
     addLayersControl();
     addLocateControl();
+    addHomeControl();
     // Establish the initial "Current clickable overlay" state (and prune the
     // sidebar's trailing borders) right away -- otherwise currentClickableOverlay
     // stays null until the user first touches an Overlays checkbox, and a
@@ -1496,7 +1726,13 @@
       // whichever one updateClickableOverlayState() (called earlier, before
       // either existed) already decided is current.
       applyClickableInteractivity();
-      try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
+      try {
+        // Cached so the Home control (see addHomeControl()) can fly back to
+        // exactly this same fitted view later, instead of just resetting to
+        // CONFIG.MAP_CENTER/MAP_ZOOM's plain starting coordinates.
+        initialCityBounds = L.geoJSON(boundaryGeoJson).getBounds();
+        map.fitBounds(initialCityBounds, { padding: [24, 24] });
+      } catch (e) { /* keep default view */ }
 
       // Not-yet-walked parcels stay hidden until the viewer has zoomed in
       // noticeably closer than this initial city-wide view -- 11k+ outlines
@@ -1769,7 +2005,22 @@
         L.DomEvent.disableClickPropagation(container);
         L.DomEvent.disableScrollPropagation(container);
 
-        var basemapSection = L.DomUtil.create("div", "layers-section", container);
+        // A small header with its own close (x) button -- shown/expanded by
+        // default (it's the whole point of the menu), but with an explicit
+        // way to tuck it away when it's in the way, same as the Settings
+        // panel's own close button. Closing collapses the whole control down
+        // to just a small icon (below) rather than removing it, so it's a
+        // one-click toggle either direction, not a one-way dismissal.
+        var header = L.DomUtil.create("div", "layers-menu-header", container);
+        L.DomUtil.create("span", "layers-menu-title", header).textContent = "Layers";
+        var closeBtn = L.DomUtil.create("button", "layers-menu-close", header);
+        closeBtn.type = "button";
+        closeBtn.setAttribute("aria-label", "Hide layers menu");
+        closeBtn.innerHTML = "&times;";
+
+        var body = L.DomUtil.create("div", "layers-menu-body", container);
+
+        var basemapSection = L.DomUtil.create("div", "layers-section", body);
         L.DomUtil.create("div", "layers-section-title", basemapSection).textContent = "Basemap";
         Object.keys(baseLayers).forEach(function (name) {
           var row = L.DomUtil.create("label", "layers-choice-row", basemapSection);
@@ -1781,19 +2032,42 @@
           row.appendChild(document.createTextNode(" " + name));
         });
 
-        var overlaysSection = L.DomUtil.create("div", "layers-section", container);
+        var overlaysSection = L.DomUtil.create("div", "layers-section", body);
         L.DomUtil.create("div", "layers-section-title", overlaysSection).textContent = "Overlays";
         [
-          { key: "precincts", label: "Voting Precincts" },
-          { key: "canvassProgress", label: "Canvass progress" },
-          { key: "districts", label: "City council districts" }
+          { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
+          { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
+          { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
         ].forEach(function (ov) {
-          var row = L.DomUtil.create("label", "layers-choice-row", overlaysSection);
+          var row = L.DomUtil.create("label", "layers-choice-row " + ov.tintClass, overlaysSection);
           var input = L.DomUtil.create("input", "", row);
           input.type = "checkbox";
           input.checked = overlaysOn[ov.key];
           L.DomEvent.on(input, "change", function () { setOverlayOn(ov.key, input.checked); });
           row.appendChild(document.createTextNode(" " + ov.label));
+        });
+
+        // The collapsed state's own reopen affordance -- a small icon-only
+        // link matching the locate/home controls' own look, hidden while
+        // the menu is expanded.
+        var reopenLink = L.DomUtil.create("a", "layers-menu-reopen-link", container);
+        reopenLink.href = "#";
+        reopenLink.title = "Show layers menu";
+        reopenLink.setAttribute("role", "button");
+        reopenLink.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+          '<polygon points="12 2 22 8.5 12 15 2 8.5 12 2"></polygon>' +
+          '<polyline points="2 15.5 12 22 22 15.5"></polyline>' +
+          '<polyline points="2 12 12 18.5 22 12"></polyline></svg>';
+
+        function setLayersMenuCollapsed(collapsed) {
+          container.classList.toggle("layers-menu-collapsed", collapsed);
+        }
+        L.DomEvent.on(closeBtn, "click", L.DomEvent.stop).on(closeBtn, "click", function () {
+          setLayersMenuCollapsed(true);
+        });
+        L.DomEvent.on(reopenLink, "click", L.DomEvent.stop).on(reopenLink, "click", function () {
+          setLayersMenuCollapsed(false);
         });
 
         return container;
@@ -1864,11 +2138,15 @@
       if (districtsLayer) {
         if (on) {
           districtsLayer.addTo(map);
+          setDistrictLabelsVisible(true);
         } else {
           map.removeLayer(districtsLayer);
+          setDistrictLabelsVisible(false);
+          if (openDistrictId) closeDistrictPanel();
           if (selectedDistrictId) {
             var prevDistrictId = selectedDistrictId;
             selectedDistrictId = null;
+            updateSelectedDistrictHighlight(null);
             restyleDistrict(prevDistrictId);
             highlightDistrictListItem(null);
           }
@@ -1924,6 +2202,21 @@
     section.hidden = !showSelector;
     if (showSelector) renderClickableOverlayChoices(onKeys);
     applyClickableInteractivity();
+  }
+
+  // Selecting a precinct or district from its own sidebar list/search --
+  // rather than by clicking its shape on the map -- should still make it the
+  // "Current clickable overlay" going forward, so a map click right
+  // afterward acts on whichever type the user was just working with instead
+  // of silently hitting whatever currentClickableOverlay was left on. A
+  // no-op when that overlay is off (nothing to switch to) or already
+  // current (e.g. every selection made by actually clicking its own shape on
+  // the map, which only ever fires through isOverlayClickActive() in the
+  // first place).
+  function setCurrentClickableOverlay(key) {
+    if (!overlaysOn[key] || currentClickableOverlay === key) return;
+    currentClickableOverlay = key;
+    updateClickableOverlayState();
   }
 
   function renderClickableOverlayChoices(onKeys) {
@@ -2005,6 +2298,45 @@
       }
     });
     map.addControl(new LocateControl());
+  }
+
+  // ================== HOME (RESET VIEW) ==================
+  // Added right after the locate control in the same "topleft" position --
+  // Leaflet stacks same-position controls in the order they're added, so
+  // this lands directly under the locate icon with no extra positioning
+  // needed.
+  function addHomeControl() {
+    var HomeControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        var container = L.DomUtil.create("div", "leaflet-bar leaflet-control home-control");
+        var link = L.DomUtil.create("a", "home-control-link", container);
+        link.href = "#";
+        link.title = "Zoom to the full city view";
+        link.setAttribute("role", "button");
+        link.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+          '<path d="M3 11l9-8 9 8"></path>' +
+          '<path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path></svg>';
+        L.DomEvent.on(link, "click", L.DomEvent.stop).on(link, "click", function () {
+          zoomToInitialCityView();
+        });
+        return container;
+      }
+    });
+    map.addControl(new HomeControl());
+  }
+
+  // Flies back to the same fitted city-wide view boot computed from
+  // city_boundary.geojson (see initialCityBounds) -- not just a plain
+  // setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM), which was only ever meant
+  // as the very first paint's placeholder before that fit happens.
+  function zoomToInitialCityView() {
+    if (!map) return;
+    try {
+      if (initialCityBounds) map.flyToBounds(initialCityBounds, { padding: [24, 24] });
+      else map.flyTo(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
+    } catch (e) { /* ignore */ }
   }
 
   function toggleLocate(linkEl) {
@@ -2158,6 +2490,11 @@
     var inSelectedPrecinct = !!(entry && selectedPrecinctId && entry.precinctId === selectedPrecinctId);
     var walked = currentWalked(key);
     var stateColor = walked ? WALKED_COLOR_HEX : PARCEL_FILL_HEX;
+    // "Transparent" (see DEFAULT_SETTINGS.colors) beats every other fill-
+    // opacity rule below, including the stronger address-search highlight --
+    // if the user asked for "no color" on this walked state, a matching
+    // parcel should show no fill at all, not just a lighter one.
+    var stateTransparent = walked ? WALKED_PARCEL_TRANSPARENT : NOT_WALKED_PARCEL_TRANSPARENT;
     return {
       // Outlines are otherwise skipped entirely -- stroking 10k+ paths is
       // the expensive part of drawing this layer on lower-powered devices,
@@ -2174,7 +2511,7 @@
       weight: isSelected ? 3 : (inSelectedPrecinct ? 1.5 : 0),
       opacity: isSelected ? 1 : (inSelectedPrecinct ? 0.9 : 0.6),
       fillColor: stateColor,
-      fillOpacity: walked ? 0.6 : (isSelected ? 0.3 : 0.12)
+      fillOpacity: stateTransparent ? 0 : (walked ? 0.6 : (isSelected ? 0.3 : 0.12))
     };
   }
 
@@ -2425,6 +2762,7 @@
   }
 
   function selectPrecinct(id) {
+    setCurrentClickableOverlay("precincts");
     var previous = selectedPrecinctId;
     selectedPrecinctId = id;
     if (previous && previous !== id) {
@@ -2689,7 +3027,11 @@
     return {
       stroke: true,
       color: isSelected ? DISTRICT_SELECTED_HEX : DISTRICT_BORDER_HEX,
-      weight: isSelected ? 4 : 2,
+      // Wider than a precinct outline on purpose -- there are only 6 of
+      // these, covering the whole city each, so a bold line reads as a
+      // deliberate reference layer rather than competing for attention with
+      // the much more numerous (and thinner) precinct/parcel outlines.
+      weight: isSelected ? 6 : 3.5,
       opacity: 1,
       fill: false
     };
@@ -2710,12 +3052,48 @@
     return (d && d.feature.properties.NameCouncil) || "";
   }
 
+  // A point guaranteed to fall inside the district's own polygon (unlike a
+  // bounding-box center, which can land outside an irregular/concave
+  // shape) -- same reasoning and approach as precinctLabelLatLng.
+  function districtLabelLatLng(feature, layer) {
+    try {
+      var pt = turf.pointOnFeature(feature);
+      var c = pt.geometry.coordinates;
+      return L.latLng(c[1], c[0]);
+    } catch (e) {
+      return layer.getBounds().getCenter();
+    }
+  }
+
+  // Shows/hides every district's "District n" label together with the
+  // shapes themselves -- these are a handful of large, always-on-screen
+  // shapes (like precincts), so unlike the parcel/precinct number labels
+  // there's no zoom-gating or fade dance here, just add/remove alongside
+  // districtsLayer itself (see addDistricts() and setOverlayOn()).
+  function setDistrictLabelsVisible(show) {
+    Object.keys(districtIndex).forEach(function (id) {
+      var marker = districtIndex[id].labelMarker;
+      if (!marker) return;
+      if (show) { if (!marker._map) map.addLayer(marker); }
+      else if (marker._map) map.removeLayer(marker);
+    });
+  }
+
   function addDistricts(districtsGeoJson) {
     districtsLayer = L.geoJSON(districtsGeoJson, {
       style: districtStyle,
       onEachFeature: function (feature, layer) {
         var id = String(feature.properties[CONFIG.DISTRICT_ID_FIELD]);
-        districtIndex[id] = { feature: feature, layer: layer };
+        districtIndex[id] = { feature: feature, layer: layer, labelMarker: null };
+        // Text is set from districtLabel(id) (falls back to "District " + id
+        // if the data has no Label property) now that the index entry above
+        // exists for it to read.
+        var labelMarker = L.marker(districtLabelLatLng(feature, layer), {
+          icon: L.divIcon({ className: "district-number-label", html: "<span>" + escapeHtml(districtLabel(id)) + "</span>", iconSize: null, iconAnchor: [0, 0] }),
+          interactive: false,
+          keyboard: false
+        });
+        districtIndex[id].labelMarker = labelMarker;
         layer.on("click", function (e) {
           // Same click-routing rule as precincts (see addPrecincts) -- only
           // acts when City council districts is both on and currently the
@@ -2729,19 +3107,59 @@
     // Same reasoning as precincts: few, large, fixed shapes meant to be
     // visible at every zoom -- gated only by the overlay checkbox, never by
     // zoom or viewport windowing.
-    if (overlaysOn.districts) districtsLayer.addTo(map);
+    if (overlaysOn.districts) {
+      districtsLayer.addTo(map);
+      setDistrictLabelsVisible(true);
+    }
+  }
+
+  var selectedDistrictHighlightLayer = null;
+
+  // Same technique and parameters as updateSelectedPrecinctHighlight -- a
+  // lone SVG-rendered outline overlay (see .district-selected-highlight)
+  // drawn just for the selected district, since the shared Canvas renderer
+  // used for districtsLayer can't take CSS filters on its own. Colored with
+  // DISTRICT_SELECTED_HEX instead of the precinct glow's color.
+  function updateSelectedDistrictHighlight(id) {
+    if (selectedDistrictHighlightLayer) {
+      map.removeLayer(selectedDistrictHighlightLayer);
+      selectedDistrictHighlightLayer = null;
+    }
+    var d = id && districtIndex[id];
+    if (!d) return;
+    selectedDistrictHighlightLayer = L.geoJSON(d.feature, {
+      renderer: L.svg(),
+      interactive: false,
+      style: {
+        className: "district-selected-highlight",
+        color: DISTRICT_SELECTED_HEX,
+        weight: 4,
+        opacity: 1,
+        fill: false
+      }
+    }).addTo(map);
   }
 
   function selectDistrict(id) {
+    setCurrentClickableOverlay("districts");
     var previous = selectedDistrictId;
     selectedDistrictId = id;
     if (previous && previous !== id) restyleDistrict(previous);
     restyleDistrict(id);
+    updateSelectedDistrictHighlight(id);
     highlightDistrictListItem(id);
-    var d = districtIndex[id];
-    if (d) {
-      try { map.flyToBounds(d.layer.getBounds(), { padding: [40, 40], duration: 0.5 }); } catch (e) { /* ignore */ }
-    }
+    // If a different district's panel is already open, close it right away
+    // rather than leaving it on screen (at its old position) for the whole
+    // duration of the fly-to-district animation below -- same reasoning as
+    // selectPrecinct(): openDistrictPanel(id) itself is deferred until that
+    // animation finishes.
+    if (openDistrictId && openDistrictId !== id) closeDistrictPanel({ keepSelectionState: true });
+    zoomToFitDistrict(id, function () {
+      // Guard against a rapid re-click / district switch while the flight
+      // was in progress: only open the panel for whichever district is
+      // still selected by the time this fires.
+      if (selectedDistrictId === id) openDistrictPanel(id);
+    });
   }
 
   // ================== DISTRICT LIST ==================
@@ -2944,12 +3362,17 @@
   // (e.g. a wide precinct near the top of the map) with no room on the left
   // or above.
   function positionPrecinctPanel(id) {
-    var panel = $("precinct-panel");
     var p = precinctIndex[id];
     if (!p) return;
+    positionPanelNearBounds($("precinct-panel"), p.layer.getBounds());
+  }
+
+  // Shared by the precinct panel and the district panel -- both are a
+  // floating box that needs to sit next to whatever shape is selected,
+  // wherever there's room for it.
+  function positionPanelNearBounds(panel, bounds) {
     var mapEl = $("map");
     var mapRect = mapEl.getBoundingClientRect();
-    var bounds = p.layer.getBounds();
     var nw = map.latLngToContainerPoint(bounds.getNorthWest());
     var se = map.latLngToContainerPoint(bounds.getSouthEast());
     var box = {
@@ -2990,13 +3413,134 @@
     panel.style.top = Math.max(minY, Math.min(pick.y, maxY)) + "px";
   }
 
-  // Closing the precinct panel (Cancel or Save) backs the map out one zoom
-  // level from wherever zoomToFitPrecinct() flew it in to -- so after you're
-  // done with a precinct, you can immediately see more of what's around it
-  // instead of staying zoomed all the way in. Not used when the panel is
-  // simply switching to a *different* precinct (see openPrecinctPanel),
+  // ================== DISTRICT PANEL ==================
+  // Which geojson properties to show, in order, with a friendly label --
+  // deliberately curated rather than dumping every property: the raw file
+  // also carries GIS bookkeeping fields (OBJECTID, OBJECTID_1, the
+  // Shape.STArea()/STLength() pair and their SHAPE_STAr/SHAPE_STLe
+  // duplicates) that mean nothing to a canvasser and would just be noise
+  // here. District/Label already appear in the panel's own title, so
+  // they're left out of this list too.
+  var DISTRICT_META_FIELDS = [
+    { key: "NameCouncil", label: "Council Member" },
+    { key: "Email", label: "Email", type: "email" },
+    { key: "TermBegin", label: "Term Begin" },
+    { key: "TermEnd", label: "Term End" },
+    { key: "URL", label: "Photo", type: "image" }
+  ];
+
+  function renderDistrictMeta(id) {
+    var container = $("district-meta");
+    var d = districtIndex[id];
+    if (!d) { container.innerHTML = ""; return; }
+    var props = d.feature.properties || {};
+    var html = [];
+    DISTRICT_META_FIELDS.forEach(function (f) {
+      var raw = props[f.key];
+      if (raw === undefined || raw === null || raw === "") return;
+      if (f.type === "image") {
+        html.push('<div class="district-meta-photo"><img src="' + escapeHtml(raw) +
+          '" alt="' + escapeHtml(districtCouncilMember(id) || districtLabel(id)) + '" loading="lazy"></div>');
+      } else if (f.type === "email") {
+        var addr = String(raw).replace(/^mailto:/i, "");
+        html.push('<div class="district-meta-row"><span class="field-label">' + escapeHtml(f.label) +
+          '</span><a href="mailto:' + escapeHtml(addr) + '">' + escapeHtml(addr) + "</a></div>");
+      } else {
+        html.push('<div class="district-meta-row"><span class="field-label">' + escapeHtml(f.label) +
+          "</span><span>" + escapeHtml(String(raw)) + "</span></div>");
+      }
+    });
+    container.innerHTML = html.join("");
+  }
+
+  function openDistrictPanel(id) {
+    openDistrictId = id;
+    $("district-panel-title").textContent = districtLabel(id);
+    renderDistrictMeta(id);
+    $("district-panel").hidden = false;
+    positionDistrictPanel(id);
+    map.on("moveend zoomend", repositionOpenDistrictPanel);
+  }
+
+  function closeDistrictPanel(opts) {
+    opts = opts || {};
+    if (!openDistrictId) return;
+    var id = openDistrictId;
+    openDistrictId = null;
+    map.off("moveend zoomend", repositionOpenDistrictPanel);
+    $("district-panel").hidden = true;
+    // Same "keepSelectionState" escape hatch as closePrecinctPanel(): when
+    // selectDistrict() calls this to close a *different* district's
+    // already-open panel mid-switch, selectedDistrictId has already moved on
+    // to the new one by the time this runs -- clearing it here would wipe
+    // out that new selection instead of the old one. A real Cancel/Escape
+    // (no keepSelectionState) does mean "deselect", though, so the glow and
+    // list highlight go away along with the panel there.
+    if (!opts.keepSelectionState) {
+      selectedDistrictId = null;
+      updateSelectedDistrictHighlight(null);
+      highlightDistrictListItem(null);
+      restyleDistrict(id);
+    }
+    if (opts.zoomOut) zoomOutOnPanelClose();
+  }
+
+  function positionDistrictPanel(id) {
+    var d = districtIndex[id];
+    if (!d) return;
+    positionPanelNearBounds($("district-panel"), d.layer.getBounds());
+  }
+
+  function repositionOpenDistrictPanel() {
+    if (openDistrictId) positionDistrictPanel(openDistrictId);
+  }
+
+  // Same settle-detection approach as zoomToFitPrecinct (see its own
+  // comment for the reasoning) -- onDone only fires once the fly-to-bounds
+  // animation has actually finished, not on the first of possibly several
+  // movestart/moveend bursts a single flyToBounds call can produce.
+  function zoomToFitDistrict(id, onDone) {
+    var d = districtIndex[id];
+    if (!d) { if (onDone) onDone(); return; }
+    var done = false;
+    var sawActivity = false;
+    var settleTimer = null;
+    var QUIET_MS = 150;
+    function finish() {
+      if (done) return;
+      done = true;
+      map.off("move", onActivity);
+      map.off("zoom", onActivity);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (onDone) onDone();
+    }
+    function onActivity() {
+      sawActivity = true;
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(finish, QUIET_MS);
+    }
+    if (onDone) {
+      map.on("move", onActivity);
+      map.on("zoom", onActivity);
+      setTimeout(function () { if (!sawActivity) finish(); }, 250);
+      setTimeout(finish, 5000);
+    }
+    try {
+      map.flyToBounds(d.layer.getBounds(), { padding: [40, 40], duration: 0.5, maxZoom: 19 });
+    } catch (e) {
+      finish();
+    }
+  }
+
+  // Closing a panel (Cancel or Save) backs the map out one zoom level from
+  // wherever the fly-to-fit-bounds flight (zoomToFitPrecinct/
+  // zoomToFitDistrict) flew it in to -- so once you're done looking at
+  // something, you can immediately see more of what's around it instead of
+  // staying zoomed all the way in. Shared by the precinct panel and the
+  // district panel; not used when a panel is simply switching to a
+  // *different* precinct/district (see openPrecinctPanel/openDistrictPanel),
   // since that flies to a new set of bounds right afterward anyway.
-  function zoomOutAfterPrecinctClose() {
+  function zoomOutOnPanelClose() {
     if (!map) return;
     try {
       map.setZoom(Math.max(map.getZoom() - 1, map.getMinZoom()), { animate: true });
@@ -3047,7 +3591,7 @@
     // discarding a previewed status change).
     updatePrecinctListRow(id);
     renderPrecinctLegend();
-    if (opts.zoomOut) zoomOutAfterPrecinctClose();
+    if (opts.zoomOut) zoomOutOnPanelClose();
   }
 
   function updatePrecinctStatusButtons() {
@@ -3113,6 +3657,8 @@
 
   $("precinct-cancel").addEventListener("click", function () { closePrecinctPanel(true, { zoomOut: true }); });
 
+  $("district-cancel").addEventListener("click", function () { closeDistrictPanel({ zoomOut: true }); });
+
   $("precinct-save").addEventListener("click", async function () {
     // Defense in depth -- the Save button is hidden entirely for a viewer
     // (see applyPrecinctPanelRoleGating()), and the real backend also
@@ -3168,6 +3714,7 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true, { zoomOut: true });
+    if (e.key === "Escape" && openDistrictId) closeDistrictPanel({ zoomOut: true });
   });
 
   // ================== SWIPE TO MARK WALKED ==================
@@ -3246,6 +3793,10 @@
     $("settings-color-unselected-outline").value = s.colors.unselectedOutline;
     $("settings-color-walked-parcel").value = s.colors.walkedParcel;
     $("settings-color-not-walked-parcel").value = s.colors.notWalkedParcel;
+    $("settings-transparent-walked-parcel").checked = !!s.colors.walkedParcelTransparent;
+    $("settings-transparent-not-walked-parcel").checked = !!s.colors.notWalkedParcelTransparent;
+    $("settings-color-walked-parcel").disabled = !!s.colors.walkedParcelTransparent;
+    $("settings-color-not-walked-parcel").disabled = !!s.colors.notWalkedParcelTransparent;
     setPrecinctFillOpacityField(s.precinctFillOpacity);
   }
 
@@ -3298,6 +3849,19 @@
   wireSettingsColorField("settings-color-unselected-outline", function (c, v) { c.unselectedOutline = v; });
   wireSettingsColorField("settings-color-walked-parcel", function (c, v) { c.walkedParcel = v; });
   wireSettingsColorField("settings-color-not-walked-parcel", function (c, v) { c.notWalkedParcel = v; });
+
+  // "Transparent" checkboxes: disable the (now-moot) color input alongside
+  // flipping the flag, so the disabled look and the actual effect on the map
+  // never disagree with each other.
+  function wireSettingsTransparentToggle(checkboxId, colorInputId, setter) {
+    $(checkboxId).addEventListener("change", function () {
+      setter(draftSettings.colors, this.checked);
+      $(colorInputId).disabled = this.checked;
+      applySettings(draftSettings);
+    });
+  }
+  wireSettingsTransparentToggle("settings-transparent-walked-parcel", "settings-color-walked-parcel", function (c, v) { c.walkedParcelTransparent = v; });
+  wireSettingsTransparentToggle("settings-transparent-not-walked-parcel", "settings-color-not-walked-parcel", function (c, v) { c.notWalkedParcelTransparent = v; });
 
   $("settings-basemap").addEventListener("change", function () {
     draftSettings.basemap = this.value;
