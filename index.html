@@ -51,21 +51,25 @@
     /* Per-overlay section header washes -- each sidebar section (and its
        matching row in the Layers menu's Overlays list) gets its own color
        instead of sharing --header-tint, so the two stay visually paired at a
-       glance, and each other's colors -- deliberately spread across the
-       color wheel (blue / violet / teal) rather than three shades of the
-       same blue -- so the three read as clearly different at a glance.
-       Drawn noticeably darker than --header-tint above (0.40 alpha vs 0.16)
-       for the same reason. --tint-precincts tracks the (customizable)
-       precinct label color live from applySettings(); --tint-canvass tracks
-       the (customizable) header-tint color; --tint-districts is fixed to
-       DISTRICT_TINT_HEX, a teal chosen specifically to look distinct from
-       --tint-precincts' blue (the map's own district borders/glow stay
-       DISTRICT_BORDER_HEX's blue -- this is purely a sidebar/Layers-menu
-       color-coding choice). These fallbacks only show for the instant before
-       JS runs. */
-    --tint-precincts: rgba(0, 71, 171, 0.40);
-    --tint-canvass: rgba(124, 58, 237, 0.40);
-    --tint-districts: rgba(15, 118, 110, 0.40);
+       glance. The three hues are spaced evenly around the color wheel --
+       120 degrees apart, since there are three overlays (Voting Precincts /
+       Canvass progress / City council districts); the rule scales down to
+       180 degrees apart if there were ever only two -- rather than clustered
+       together, so the three read as clearly different colors at a glance
+       instead of three shades of the same hue. Drawn noticeably darker than
+       --header-tint above (0.40 alpha vs 0.16) for the same reason. All
+       three are fixed JS constants (OVERLAY_TINT_*_HEX, set in applySettings())
+       rather than derived from the customizable precinct-label/header-tint
+       settings colors -- deriving them from two independently user-adjustable
+       colors could reintroduce exactly the clustering this is meant to avoid,
+       so the tint hues are locked to a chosen evenly-spaced triad regardless
+       of what a user sets those other colors to. (The map's own precinct/
+       district borders and glow keep using the customizable/DISTRICT_BORDER_HEX
+       colors -- this is purely a sidebar/Layers-menu color-coding choice.)
+       These fallbacks only show for the instant before JS runs. */
+    --tint-precincts: rgba(43, 96, 171, 0.40);
+    --tint-canvass: rgba(96, 171, 43, 0.40);
+    --tint-districts: rgba(171, 43, 96, 0.40);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -479,6 +483,17 @@
   .layers-choice-row-precincts { background: linear-gradient(180deg, var(--tint-precincts), transparent 85%); }
   .layers-choice-row-canvass { background: linear-gradient(180deg, var(--tint-canvass), transparent 85%); }
   .layers-choice-row-districts { background: linear-gradient(180deg, var(--tint-districts), transparent 85%); }
+
+  /* Marks whichever Overlays row (precincts or districts -- canvassProgress
+     is never clickable, see CLICKABLE_OVERLAYS) is the current clickable
+     overlay, right in the Layers menu itself, so it's obvious at a glance
+     which overlay a map click will act on without having to also check the
+     sidebar's separate "Current clickable overlay" selector. An inset
+     box-shadow rather than a border/outline so it respects the row's own
+     border-radius and never shifts layout (box-sizing is border-box, but an
+     actual border would still nudge the row's negative-margin bleed against
+     its rounded neighbors). Toggled in JS by updateLayersMenuClickableOutline(). */
+  .layers-choice-row-current-clickable { box-shadow: inset 0 0 0 2px #000000; }
 
   .layers-menu-header {
     display: flex;
@@ -1411,14 +1426,22 @@
   // never mistaken for the selected-precinct glow.
   var DISTRICT_BORDER_HEX = "#1D4ED8";
   var DISTRICT_SELECTED_HEX = "#60A5FA";
-  // Used only for the districts section-header/Layers-menu-row tint (see
-  // --tint-districts) -- deliberately a different hue (teal) from
-  // DISTRICT_BORDER_HEX's blue, since that blue is already close to the
-  // Voting Precincts tint (cobalt) and the two need to read as clearly
-  // different colors, not two shades of the same one. The map's own district
-  // borders/glow stay DISTRICT_BORDER_HEX/DISTRICT_SELECTED_HEX -- this is
-  // purely a sidebar/Layers-menu color-coding choice.
-  var DISTRICT_TINT_HEX = "#0F766E";
+
+  // The three overlay section-header/Layers-menu-row tints (see
+  // --tint-precincts/-canvass/-districts in :root above). Fixed constants,
+  // not derived from the customizable precinct-label/header-tint settings
+  // colors, chosen so the three hues sit exactly 120 degrees apart around
+  // the color wheel (blue / green / rose) -- evenly spaced hues at matching
+  // saturation/lightness read as clearly distinct at a glance, unlike colors
+  // that happen to be close together on the wheel. General rule this
+  // follows: 180 degrees apart for 2 overlays, 120 degrees apart for 3
+  // (currently always 3: Voting Precincts, Canvass progress, City council
+  // districts). The map's own district borders/glow are unrelated and keep
+  // using DISTRICT_BORDER_HEX/DISTRICT_SELECTED_HEX -- this triad is purely
+  // a sidebar/Layers-menu color-coding choice.
+  var OVERLAY_TINT_PRECINCTS_HEX = "#2B60AB"; // hue 215 deg
+  var OVERLAY_TINT_CANVASS_HEX = "#60AB2B";   // hue 95 deg  (215 + 120)
+  var OVERLAY_TINT_DISTRICTS_HEX = "#AB2B60"; // hue 335 deg (215 + 240)
 
   // These four are plain JS values (not CSS var() references) because
   // Leaflet's Canvas renderer draws to a <canvas> pixel buffer -- it can't
@@ -1453,23 +1476,16 @@
     root.setProperty("--precinct-completed", c.completed);
     root.setProperty("--precinct-selected-border", c.selectedBorder);
     root.setProperty("--precinct-label-color", c.precinctLabel);
-    // Keeps the "Voting Precincts" section header (and its matching Layers-
-    // menu row) tinted with whatever the precinct number-label color is set
-    // to, live -- see the --tint-precincts comment in :root above. Uses the
-    // darker SECTION_TINT_ALPHA (not HEADER_TINT_ALPHA) so these three
+    // The three overlay section-header/Layers-menu-row tints -- fixed,
+    // evenly-spaced-around-the-color-wheel constants (see the
+    // OVERLAY_TINT_*_HEX comment above), not derived from the customizable
+    // precinct-label/header-tint settings colors above. Uses the darker
+    // SECTION_TINT_ALPHA (not HEADER_TINT_ALPHA) so these three
     // overlay-specific tints read as clearly distinct colors, not a light
     // wash that all looks about the same.
-    root.setProperty("--tint-precincts", hexToRgba(c.precinctLabel, SECTION_TINT_ALPHA));
-    // Canvass progress's own tint -- previously it just reused --header-tint
-    // directly (see the .layers-choice-row-canvass/#address-list-section
-    // comments below); it's still built from that same settings color, just
-    // at the darker SECTION_TINT_ALPHA so it's consistent with the other two.
-    root.setProperty("--tint-canvass", hexToRgba(c.headerTint, SECTION_TINT_ALPHA));
-    // Fixed, not settings-driven (see the --tint-districts comment in :root
-    // above) -- built from DISTRICT_TINT_HEX, a color chosen specifically to
-    // look distinct from --tint-precincts' blue (not DISTRICT_BORDER_HEX,
-    // which the map's own district borders/glow still use).
-    root.setProperty("--tint-districts", hexToRgba(DISTRICT_TINT_HEX, SECTION_TINT_ALPHA));
+    root.setProperty("--tint-precincts", hexToRgba(OVERLAY_TINT_PRECINCTS_HEX, SECTION_TINT_ALPHA));
+    root.setProperty("--tint-canvass", hexToRgba(OVERLAY_TINT_CANVASS_HEX, SECTION_TINT_ALPHA));
+    root.setProperty("--tint-districts", hexToRgba(OVERLAY_TINT_DISTRICTS_HEX, SECTION_TINT_ALPHA));
     root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
     root.setProperty("--walked-color", c.walkedParcel);
     root.setProperty("--parcel-fill", c.notWalkedParcel);
@@ -2262,6 +2278,24 @@
     section.hidden = !showSelector;
     if (showSelector) renderClickableOverlayChoices(onKeys);
     applyClickableInteractivity();
+    updateLayersMenuClickableOutline();
+  }
+
+  // Puts the black "current clickable overlay" outline (see
+  // .layers-choice-row-current-clickable) on whichever Overlays row in the
+  // Layers menu matches currentClickableOverlay, and off every other row.
+  // Called from every place currentClickableOverlay can change: here (covers
+  // updateClickableOverlayState()'s own reassignments and, transitively,
+  // setCurrentClickableOverlay()) and directly from the clickable-overlay
+  // radio buttons' own change handler below, which sets the variable without
+  // going through updateClickableOverlayState().
+  function updateLayersMenuClickableOutline() {
+    var container = document.querySelector(".layers-menu");
+    if (!container) return; // control not built yet
+    CLICKABLE_OVERLAYS.forEach(function (key) {
+      var row = container.querySelector(".layers-choice-row-" + key);
+      if (row) row.classList.toggle("layers-choice-row-current-clickable", key === currentClickableOverlay);
+    });
   }
 
   // Selecting a precinct or district from its own sidebar list/search --
@@ -2292,6 +2326,7 @@
     if (e.target && e.target.name === "a4m-clickable-overlay") {
       currentClickableOverlay = e.target.value;
       applyClickableInteractivity();
+      updateLayersMenuClickableOutline();
     }
   });
 
@@ -2834,6 +2869,12 @@
 
   function selectPrecinct(id) {
     setCurrentClickableOverlay("precincts");
+    // Only one overlay item can be selected at a time -- picking a precinct
+    // here must first clear any selected/open district (closing its panel
+    // and glow if one is showing), otherwise both info panels end up on
+    // screen together. See deselectDistrict()'s comment for why this can't
+    // just be closeDistrictPanel().
+    deselectDistrict();
     var previous = selectedPrecinctId;
     selectedPrecinctId = id;
     if (previous && previous !== id) {
@@ -3213,6 +3254,9 @@
 
   function selectDistrict(id) {
     setCurrentClickableOverlay("districts");
+    // Only one overlay item can be selected at a time -- mirror of the
+    // deselectDistrict() call in selectPrecinct() above.
+    deselectPrecinct();
     var previous = selectedDistrictId;
     selectedDistrictId = id;
     if (previous && previous !== id) restyleDistrict(previous);
@@ -3533,6 +3577,27 @@
     map.on("moveend zoomend", repositionOpenDistrictPanel);
   }
 
+  // Clears the district selection (if any) so that a different overlay's
+  // item can become the sole selection -- used by selectPrecinct() to
+  // enforce "only one overlay item selected at a time". Can't just delegate
+  // to closeDistrictPanel() unconditionally: that function early-returns
+  // when openDistrictId is null, which happens whenever a district has been
+  // selected but its panel hasn't opened yet (the fly-to-bounds animation
+  // in selectDistrict() defers opening the panel until the flight settles).
+  // So this handles both cases: an open panel (delegate to
+  // closeDistrictPanel(), which also clears the glow/list highlight) and a
+  // mid-flight selection with no panel yet (clear the glow/list highlight
+  // directly, since there's no panel to close).
+  function deselectDistrict() {
+    if (openDistrictId) { closeDistrictPanel({}); return; }
+    if (!selectedDistrictId) return;
+    var id = selectedDistrictId;
+    selectedDistrictId = null;
+    updateSelectedDistrictHighlight(null);
+    highlightDistrictListItem(null);
+    restyleDistrict(id);
+  }
+
   function closeDistrictPanel(opts) {
     opts = opts || {};
     if (!openDistrictId) return;
@@ -3627,6 +3692,24 @@
   //                         already applied the new precinct's selection state
   //                         just before this runs, and clearing it here would
   //                         wipe that back out from under it.
+  // Mirror of deselectDistrict() for precincts -- used by selectDistrict()
+  // to enforce "only one overlay item selected at a time". See
+  // deselectDistrict()'s comment for why the open-panel vs.
+  // selected-but-mid-flight cases both need to be handled here.
+  function deselectPrecinct() {
+    if (openPrecinctId) { closePrecinctPanel(true, {}); return; }
+    if (!selectedPrecinctId) return;
+    var id = selectedPrecinctId;
+    selectedPrecinctId = null;
+    updateSelectedPrecinctHighlight(null);
+    highlightPrecinctListItem(null);
+    restylePrecinctParcels(id);
+    updateVisibleParcels();
+    restylePrecinct(id);
+    updatePrecinctListRow(id);
+    renderPrecinctLegend();
+  }
+
   function closePrecinctPanel(discard, opts) {
     opts = opts || {};
     if (!openPrecinctId) return;
