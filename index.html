@@ -233,8 +233,30 @@
     display: flex;
     flex-direction: column;
     border-bottom: 1px solid var(--border);
+    /* With up to 5 sections now sharing the sidebar at once (the Overlays
+       feature can show precinct progress + precinct list + district list +
+       address list + the clickable-overlay picker all at the same time),
+       each section's equal flex share can end up shorter than a capped
+       list's own fixed row-height cap (applyListHeightCap() -- a
+       flex-shrink:0 list won't compress below that). Without this, the
+       excess visibly spilled down over whatever section came next instead
+       of staying contained -- same "don't bleed into your neighbor"
+       principle the list's own overflow-y:auto already follows, just
+       applied one level up. */
+    overflow: hidden;
   }
-  .sidebar-section:last-child { border-bottom: none; }
+  /* Not :last-child -- sections can be individually hidden now (see the
+     Overlays checkboxes / setOverlayOn()), and a hidden one is still in the
+     DOM, so ":last-child" would leave the border on whichever visible
+     section happens to sit above a hidden trailing one. JS toggles this
+     class onto whichever section is actually last among the visible ones
+     (updateSidebarSectionBorders(), called by setOverlayOn()). */
+  .sidebar-section.sidebar-section-last { border-bottom: none; }
+  /* .sidebar-section sets display:flex above, which (same specificity as the
+     browser's own "[hidden]{display:none}" rule, and later in the cascade)
+     would otherwise win and keep a "hidden" section visible -- same fix
+     already used elsewhere in this file (.precinct-panel[hidden] etc.). */
+  .sidebar-section[hidden] { display: none; }
 
   .sidebar-header {
     padding: 12px 14px 8px;
@@ -268,7 +290,7 @@
      flex: 1 1 0 (three equal-height sections), whatever height a capped
      list doesn't use is left as breathing room in that section instead of
      one long list swallowing the whole sidebar. */
-  #precinct-list, #address-list {
+  #precinct-list, #district-list, #address-list {
     flex: 0 0 auto;
     overflow-y: auto;
     list-style: none;
@@ -276,7 +298,7 @@
     padding: 4px 0;
     min-height: 0;
   }
-  #precinct-list li, #address-list li {
+  #precinct-list li, #district-list li, #address-list li {
     padding: 8px 14px;
     font-size: 0.85rem;
     cursor: pointer;
@@ -286,13 +308,13 @@
     justify-content: flex-start;
     gap: 8px;
   }
-  #precinct-list li:hover, #address-list li:hover { background: var(--paper); }
-  #precinct-list li.active, #address-list li.active {
+  #precinct-list li:hover, #district-list li:hover, #address-list li:hover { background: var(--paper); }
+  #precinct-list li.active, #district-list li.active, #address-list li.active {
     background: var(--select);
     color: #fff;
     font-weight: 600;
   }
-  #precinct-list .empty-msg, #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
+  #precinct-list .empty-msg, #district-list .empty-msg, #address-list .empty-msg { padding: 16px 14px; color: var(--muted); font-size: 0.82rem; }
   .status-dot {
     width: 9px;
     height: 9px;
@@ -301,7 +323,7 @@
   }
   .precinct-id { font-family: "IBM Plex Mono", monospace; font-size: 0.82rem; }
   .precinct-progress { margin-left: auto; font-size: 0.74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-  #precinct-list li.active .precinct-progress { color: #fff; opacity: 0.85; }
+  #precinct-list li.active .precinct-progress, #district-list li.active .precinct-progress { color: #fff; opacity: 0.85; }
 
   .sidebar-footer {
     padding: 8px 14px;
@@ -334,18 +356,59 @@
   .legend-label { flex: 1; }
   .legend-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-  /* ---------- base layer switcher ---------- */
-  .leaflet-control-layers {
+  /* Only rendered/shown when 2+ clickable overlays are on at once (see
+     updateClickableOverlayState()) -- otherwise there's nothing to choose
+     between, so the section itself stays hidden. */
+  .clickable-overlay-choices {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .clickable-overlay-choice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .clickable-overlay-choice input { accent-color: var(--select); margin: 0; }
+
+  /* ---------- layers menu (Basemap + Overlays) ---------- */
+  .layers-menu {
     border-radius: 8px !important;
     border: 1px solid var(--border) !important;
     box-shadow: var(--shadow) !important;
     background: var(--panel) !important;
     color: var(--ink);
     font-family: "Public Sans", sans-serif;
+    font-size: 0.85rem;
+    padding: 8px 10px;
   }
-  .leaflet-control-layers-toggle { border-radius: 8px; }
-  .leaflet-control-layers-expanded { padding: 8px 10px; font-size: 0.85rem; }
-  .leaflet-control-layers-selector { accent-color: var(--select); margin-right: 6px; }
+  .layers-section + .layers-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .layers-section-title {
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .layers-choice-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .layers-choice-row input { accent-color: var(--select); margin: 0; }
 
   /* ---------- my-location control ---------- */
   .locate-control-link {
@@ -781,9 +844,15 @@
   <div id="map"></div>
   <div id="zoom-level-indicator" hidden></div>
   <aside class="sidebar">
-    <div class="sidebar-section">
+    <div class="sidebar-section" id="clickable-overlay-section" hidden>
       <div class="sidebar-header">
-        <h2>Canvassing progress</h2>
+        <h2>Current clickable overlay</h2>
+      </div>
+      <div class="clickable-overlay-choices" id="clickable-overlay-choices"></div>
+    </div>
+    <div class="sidebar-section" id="precinct-progress-section">
+      <div class="sidebar-header">
+        <h2>Precinct canvassing progress</h2>
       </div>
       <div class="status-legend" id="precinct-legend">
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-not-printed)"></span><span class="legend-label">Not Yet Printed</span><span class="legend-count" id="legend-count-not-printed">0</span></div>
@@ -792,14 +861,21 @@
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-completed)"></span><span class="legend-label">Completed</span><span class="legend-count" id="legend-count-completed">0</span></div>
       </div>
     </div>
-    <div class="sidebar-section">
+    <div class="sidebar-section" id="precinct-list-section">
       <div class="sidebar-header">
-        <h2>Precincts</h2>
+        <h2>Voting precincts</h2>
         <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
       </div>
       <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
     </div>
-    <div class="sidebar-section">
+    <div class="sidebar-section" id="district-list-section" hidden>
+      <div class="sidebar-header">
+        <h2>City council districts</h2>
+        <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
+      </div>
+      <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
+    </div>
+    <div class="sidebar-section" id="address-list-section">
       <div class="sidebar-header">
         <h2>Address</h2>
         <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
@@ -928,9 +1004,12 @@
     CITY_BOUNDARY_URL: "data/city_boundary.geojson",
     PARCELS_URL: "data/parcels.geojson",
     PRECINCTS_URL: "data/precincts.geojson",
+    COUNCIL_DISTRICTS_URL: "data/council_districts.geojson",
     SITEADD_FIELD: "SITEADD",
     PRECINCT_ID_FIELD: "id",
     PARCEL_PRECINCT_FIELD: "PRECINCT_ID",
+    DISTRICT_ID_FIELD: "District",
+    DISTRICT_LABEL_FIELD: "Label",
     MAP_CENTER: [36.9791, -122.0330],
     MAP_ZOOM: 14,
     NEIGHBORHOOD_ZOOM_DESKTOP: 20,   // zoom level the map flies to when a parcel is selected
@@ -956,7 +1035,7 @@
   var DEMO_ROLES = { chuck: "editor", rachel: "editor", test: "viewer" };
 
   // ================== STATE ==================
-  var map, boundaryLayer, parcelsLayer, precinctsLayer;
+  var map, boundaryLayer, parcelsLayer, precinctsLayer, districtsLayer;
   var parcelsVisible = false;      // true once zoomed in enough for the full (viewport-windowed) parcels pass -- walked parcels show even below that, see updateVisibleParcels
   var parcelsMinZoom = null;       // computed once the initial city-wide view is set
   var precinctLabelsMinZoom = null; // computed once the initial city-wide view is set
@@ -966,13 +1045,29 @@
   var parcelIndex = {};
   // precinctId(string) -> { feature, layer, parcelKeys: [address keys...] }
   var precinctIndex = {};
+  // districtId(string) -> { feature, layer }
+  var districtIndex = {};
   var precinctStatusData = {};   // precinctId -> { status, completedDate, notes, updatedAt, updatedBy }
   var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
   var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
   var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
   var selectedAddressKey = null;
   var selectedPrecinctId = null;
+  var selectedDistrictId = null;
   var currentUser = null;      // { username, displayName, role } -- role is "editor" or "viewer"
+
+  // ---- overlays (layers menu) ----
+  // Which optional map layers are showing right now, and (for the two that
+  // respond to a map click -- Canvass progress never does) which one of
+  // those actually gets to handle the next click. Each of these drives both
+  // a map layer and a whole sidebar section together -- see setOverlayOn().
+  var overlaysOn = { precincts: true, canvassProgress: true, districts: false };
+  var CLICKABLE_OVERLAYS = ["precincts", "districts"];
+  // Which clickable overlay currently owns map clicks -- null when none of
+  // CLICKABLE_OVERLAYS are on. Kept correct by updateClickableOverlayState(),
+  // which every setOverlayOn() call ends with; nothing else should assign
+  // this directly.
+  var currentClickableOverlay = null;
 
   // A viewer can open and look at the precinct panel, but can't set status,
   // mark parcels walked, write notes, or touch the Map Settings panel.
@@ -1055,6 +1150,15 @@
   var settingsUpdatedAt = null;   // server timestamp of currentSettings, so the sync poll only re-applies a newer save
   var baseLayers = null;          // { "Hybrid": layer, "Satellite": layer, "Streets": layer } -- set in initMap()
 
+  // City council districts are a fixed reference overlay (not part of the
+  // canvassing data model, no per-district status/editing), so unlike the
+  // precinct/parcel colors above these aren't customizable from the
+  // Settings panel -- just a plain outline-only blue, distinct from the
+  // cobalt selectedBorder/precinctLabel color so a district outline is
+  // never mistaken for the selected-precinct glow.
+  var DISTRICT_BORDER_HEX = "#1D4ED8";
+  var DISTRICT_SELECTED_HEX = "#60A5FA";
+
   // These four are plain JS values (not CSS var() references) because
   // Leaflet's Canvas renderer draws to a <canvas> pixel buffer -- it can't
   // resolve CSS custom properties the way the legend/list/label DOM can.
@@ -1122,6 +1226,13 @@
       if (key === name) { if (!map.hasLayer(layer)) map.addLayer(layer); }
       else if (map.hasLayer(layer)) map.removeLayer(layer);
     });
+    // Single source of truth: whatever calls setBasemap (the Settings panel's
+    // dropdown, a synced setting from another canvasser via
+    // applySettingsFromServer, or the initial applySettings(currentSettings)
+    // at boot) ends up here, so the layers-menu radio buttons never need
+    // their own separate change handling -- they just mirror whatever this
+    // function just did. A no-op before addLayersControl() has built them.
+    updateBasemapControlUI(name);
   }
 
   // ================== UTIL ==================
@@ -1301,13 +1412,15 @@
     // Settings panel) can switch this once it's fetched, via setBasemap().
     setBasemap(currentSettings.basemap || DEFAULT_SETTINGS.basemap);
 
-    L.control.layers(
-      baseLayers,
-      null,
-      { position: "topright" }
-    ).addTo(map);
-
+    addLayersControl();
     addLocateControl();
+    // Establish the initial "Current clickable overlay" state (and prune the
+    // sidebar's trailing borders) right away -- otherwise currentClickableOverlay
+    // stays null until the user first touches an Overlays checkbox, and a
+    // click on the default-on Voting Precincts layer would silently do
+    // nothing until then.
+    updateClickableOverlayState();
+    updateSidebarSectionBorders();
 
     map.on("click", function () { deselectParcel(); });
     // Address (parcel number) labels are plain DOM markers, not part of the
@@ -1336,6 +1449,7 @@
       fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
       fetch(CONFIG.PARCELS_URL).then(function (r) { return r.json(); }),
       fetch(CONFIG.PRECINCTS_URL).then(function (r) { return r.json(); }),
+      fetch(CONFIG.COUNCIL_DISTRICTS_URL).then(function (r) { return r.json(); }),
       DEMO_MODE
         ? Promise.resolve({ ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() })
         : apiGet("all", {}).catch(function () { return { ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() }; })
@@ -1343,7 +1457,8 @@
       var boundaryGeoJson = results[0];
       var parcelsGeoJson = results[1];
       var precinctsGeoJson = results[2];
-      var stateRes = results[3];
+      var districtsGeoJson = results[3];
+      var stateRes = results[4];
 
       if (stateRes && stateRes.ok) {
         (stateRes.precincts || []).forEach(function (p) {
@@ -1365,9 +1480,22 @@
 
       addBoundaryDimming(boundaryGeoJson);
       addPrecincts(precinctsGeoJson);
+      // Districts are added before parcels (not after) so parcels -- which
+      // cover far less area and are what "select a specific address" is
+      // actually about -- stay the topmost interactive shape wherever
+      // they're drawn, same as they already are over precincts. See
+      // applyClickableInteractivity() for how a click still reaches
+      // whichever of precincts/districts is current when no parcel is
+      // covering that spot.
+      addDistricts(districtsGeoJson);
       addParcels(parcelsGeoJson);
       addBoundaryOutline(boundaryGeoJson);
       buildPrecinctList();
+      buildDistrictList();
+      // Now that both clickable overlays' shapes actually exist, apply
+      // whichever one updateClickableOverlayState() (called earlier, before
+      // either existed) already decided is current.
+      applyClickableInteractivity();
       try { map.fitBounds(L.geoJSON(boundaryGeoJson).getBounds(), { padding: [24, 24] }); } catch (e) { /* keep default view */ }
 
       // Not-yet-walked parcels stay hidden until the viewer has zoomed in
@@ -1454,6 +1582,21 @@
   // hundreds regardless of city size.
   function updateVisibleParcels() {
     if (!parcelsLayer || parcelsMinZoom === null) return;
+
+    // "Canvass progress" overlay off -- no colored parcel areas at all,
+    // walked or not, regardless of zoom (see setOverlayOn()). Same
+    // attach/detach mechanics as the below-threshold branch just below,
+    // just with nothing kept on.
+    if (!overlaysOn.canvassProgress) {
+      parcelsVisible = false;
+      Object.keys(parcelIndex).forEach(function (key) {
+        var entry = parcelIndex[key];
+        entry.layers.forEach(function (l) { if (l._map) map.removeLayer(l); });
+        removeNumberLabel(entry);
+      });
+      return;
+    }
+
     var zoom = map.getZoom();
 
     if (zoom < parcelsMinZoom) {
@@ -1605,6 +1748,240 @@
   function updateZoomLevelIndicator() {
     if (!showZoomLevel || !map) return;
     $("zoom-level-indicator").textContent = "Zoom " + map.getZoom().toFixed(2);
+  }
+
+  // ================== LAYERS MENU ==================
+  // A hand-built control rather than Leaflet's own L.control.layers(): the
+  // spec calls for section headings ("Basemap"/"Overlays") the built-in
+  // control has no support for, and the Overlays section needs behavior
+  // (showing/hiding whole sidebar sections, gating which shape a map click
+  // selects) well beyond what the built-in control's own add/remove-layer
+  // events are meant for. Easier to just own the whole thing -- same
+  // approach as the locate control just below.
+  function addLayersControl() {
+    var LayersControl = L.Control.extend({
+      options: { position: "topright" },
+      onAdd: function () {
+        var container = L.DomUtil.create("div", "leaflet-bar leaflet-control layers-menu");
+        // Same as Leaflet's own layers control: without these, dragging or
+        // double-clicking inside this control would drag/zoom the map
+        // underneath it.
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+
+        var basemapSection = L.DomUtil.create("div", "layers-section", container);
+        L.DomUtil.create("div", "layers-section-title", basemapSection).textContent = "Basemap";
+        Object.keys(baseLayers).forEach(function (name) {
+          var row = L.DomUtil.create("label", "layers-choice-row", basemapSection);
+          var input = L.DomUtil.create("input", "", row);
+          input.type = "radio";
+          input.name = "a4m-basemap";
+          input.value = name;
+          L.DomEvent.on(input, "change", function () { if (input.checked) setBasemap(name); });
+          row.appendChild(document.createTextNode(" " + name));
+        });
+
+        var overlaysSection = L.DomUtil.create("div", "layers-section", container);
+        L.DomUtil.create("div", "layers-section-title", overlaysSection).textContent = "Overlays";
+        [
+          { key: "precincts", label: "Voting Precincts" },
+          { key: "canvassProgress", label: "Canvass progress" },
+          { key: "districts", label: "City council districts" }
+        ].forEach(function (ov) {
+          var row = L.DomUtil.create("label", "layers-choice-row", overlaysSection);
+          var input = L.DomUtil.create("input", "", row);
+          input.type = "checkbox";
+          input.checked = overlaysOn[ov.key];
+          L.DomEvent.on(input, "change", function () { setOverlayOn(ov.key, input.checked); });
+          row.appendChild(document.createTextNode(" " + ov.label));
+        });
+
+        return container;
+      }
+    });
+    map.addControl(new LayersControl());
+    // The radio buttons just built need to reflect whatever basemap is
+    // already showing (setBasemap() itself already tried this, at
+    // initMap()'s very start, before this control existed to update).
+    updateBasemapControlUI(currentSettings.basemap || DEFAULT_SETTINGS.basemap);
+  }
+
+  // Mirrors whichever basemap is actually showing into the layers menu's own
+  // radio buttons. Called from setBasemap() -- the one place that ever
+  // actually switches the map's base tile layer -- so the menu can't drift
+  // out of sync with reality no matter what triggered the switch (the
+  // Settings panel's dropdown, a synced setting from another canvasser, or
+  // this control's own radio buttons).
+  function updateBasemapControlUI(name) {
+    var container = document.querySelector(".layers-menu");
+    if (!container) return; // control not built yet
+    container.querySelectorAll('input[name="a4m-basemap"]').forEach(function (input) {
+      input.checked = (input.value === name);
+    });
+  }
+
+  // ---- overlays ----
+  // Which sidebar section(s) live and die with each overlay. Precinct
+  // canvassing progress is bundled in with the Voting Precincts overlay --
+  // at a glance they're the same "precinct" concept, and there's no
+  // standalone toggle for the progress legend on its own.
+  var OVERLAY_SECTIONS = {
+    precincts: ["precinct-progress-section", "precinct-list-section"],
+    canvassProgress: ["address-list-section"],
+    districts: ["district-list-section"]
+  };
+
+  // Central overlay on/off toggle -- everything that responds to an overlay
+  // switching (the map layer itself, its sidebar section(s), which overlay
+  // owns map clicks) goes through here, whether the switch came from this
+  // control's checkbox or (in principle) anywhere else in the app.
+  function setOverlayOn(key, on) {
+    if (!overlaysOn.hasOwnProperty(key) || overlaysOn[key] === on) return;
+    overlaysOn[key] = on;
+
+    if (key === "precincts") {
+      if (precinctsLayer) {
+        if (on) {
+          precinctsLayer.addTo(map);
+        } else {
+          map.removeLayer(precinctsLayer);
+          // Nothing on this layer can legitimately stay "selected" or "open"
+          // once it's off the map -- drop that state now rather than leaving
+          // a stale panel/highlight around, or having it reappear on its own
+          // when the overlay comes back on.
+          if (openPrecinctId) closePrecinctPanel(true);
+          if (selectedPrecinctId) {
+            selectedPrecinctId = null;
+            updateSelectedPrecinctHighlight(null);
+            highlightPrecinctListItem(null);
+          }
+        }
+      }
+      updatePrecinctLabelsVisibility();
+    } else if (key === "canvassProgress") {
+      updateVisibleParcels();
+    } else if (key === "districts") {
+      if (districtsLayer) {
+        if (on) {
+          districtsLayer.addTo(map);
+        } else {
+          map.removeLayer(districtsLayer);
+          if (selectedDistrictId) {
+            var prevDistrictId = selectedDistrictId;
+            selectedDistrictId = null;
+            restyleDistrict(prevDistrictId);
+            highlightDistrictListItem(null);
+          }
+        }
+      }
+    }
+
+    (OVERLAY_SECTIONS[key] || []).forEach(function (id) {
+      var el = $(id);
+      if (el) el.hidden = !on;
+    });
+
+    if (key === "districts" && on) {
+      // buildDistrictList() at boot ran while this section was still
+      // hidden (off by default) -- applyListHeightCap's row-height
+      // measurement comes back 0 for a display:none element, so no cap
+      // ever got set, and the list rendered at full, uncapped height,
+      // overlapping whatever sidebar section came after it. Now that the
+      // section (and so the list) is actually visible and measurable,
+      // redo it.
+      applyListHeightCap($("district-list"));
+    }
+
+    // Order matters: the clickable-overlay selector's own hidden state can
+    // change here too, so borders are only recomputed once everything above
+    // has settled.
+    updateClickableOverlayState();
+    updateSidebarSectionBorders();
+  }
+
+  var CLICKABLE_OVERLAY_LABEL = { precincts: "Voting Precincts", districts: "City council districts" };
+
+  // Keeps currentClickableOverlay correct -- null with none of
+  // CLICKABLE_OVERLAYS on, that one overlay when exactly one is on, the
+  // user's last explicit choice (or a sensible default) when two or more
+  // are -- and shows/rebuilds the "Current clickable overlay" section, which
+  // only needs to exist once there's an actual choice to make.
+  function updateClickableOverlayState() {
+    var onKeys = CLICKABLE_OVERLAYS.filter(function (k) { return overlaysOn[k]; });
+
+    if (onKeys.length === 0) {
+      currentClickableOverlay = null;
+    } else if (onKeys.length === 1) {
+      currentClickableOverlay = onKeys[0];
+    } else if (onKeys.indexOf(currentClickableOverlay) === -1) {
+      // Previous choice (if any) is no longer one of the "on" overlays --
+      // fall back to the first, in CLICKABLE_OVERLAYS' own order.
+      currentClickableOverlay = onKeys[0];
+    }
+
+    var section = $("clickable-overlay-section");
+    var showSelector = onKeys.length > 1;
+    section.hidden = !showSelector;
+    if (showSelector) renderClickableOverlayChoices(onKeys);
+    applyClickableInteractivity();
+  }
+
+  function renderClickableOverlayChoices(onKeys) {
+    $("clickable-overlay-choices").innerHTML = onKeys.map(function (key) {
+      return '<label class="clickable-overlay-choice">' +
+        '<input type="radio" name="a4m-clickable-overlay" value="' + escapeHtml(key) + '"' +
+        (key === currentClickableOverlay ? " checked" : "") + ">" +
+        escapeHtml(CLICKABLE_OVERLAY_LABEL[key] || key) + "</label>";
+    }).join("");
+  }
+
+  $("clickable-overlay-choices").addEventListener("change", function (e) {
+    if (e.target && e.target.name === "a4m-clickable-overlay") {
+      currentClickableOverlay = e.target.value;
+      applyClickableInteractivity();
+    }
+  });
+
+  // True when a click on this overlay's own map shapes should actually
+  // select+zoom -- false either because the overlay itself is off, or (with
+  // two-plus clickable overlays on) a different one is currently chosen.
+  // "canvassProgress" is never in CLICKABLE_OVERLAYS, so it never reaches
+  // here at all -- it's just never clickable.
+  function isOverlayClickActive(key) {
+    return overlaysOn[key] === true && currentClickableOverlay === key;
+  }
+
+  // Each layer's own click handler already no-ops via isOverlayClickActive()
+  // when it isn't the current one -- but Leaflet's Canvas renderer still
+  // does its hit-testing purely by geometry and z-order, so with both
+  // Voting Precincts and City council districts on, whichever one happens
+  // to be drawn on top would otherwise silently *swallow* every click
+  // there, even the ones meant for the overlay underneath (confirmed: city
+  // council districts cover the whole city, so with them drawn above
+  // precincts this made precinct-clicking dead everywhere while districts
+  // wasn't even the chosen one). Leaflet's Canvas hit-test rechecks
+  // layer.options.interactive at click time (not just when the shape was
+  // created), so marking the non-current one's shapes non-interactive here
+  // lets a click pass straight through to whatever's actually current
+  // beneath it, instead of stopping dead on contact.
+  function applyClickableInteractivity() {
+    Object.keys(precinctIndex).forEach(function (id) {
+      precinctIndex[id].layer.options.interactive = isOverlayClickActive("precincts");
+    });
+    Object.keys(districtIndex).forEach(function (id) {
+      districtIndex[id].layer.options.interactive = isOverlayClickActive("districts");
+    });
+  }
+
+  // A hidden sidebar section is still in the DOM, so plain CSS ":last-child"
+  // can't tell "last VISIBLE section" -- this finds it directly and toggles
+  // the class that actually drops the trailing border (see the
+  // .sidebar-section-last CSS comment).
+  function updateSidebarSectionBorders() {
+    var sections = document.querySelectorAll(".sidebar-section:not([hidden])");
+    sections.forEach(function (el, i) {
+      el.classList.toggle("sidebar-section-last", i === sections.length - 1);
+    });
   }
 
   // ================== MY LOCATION ==================
@@ -1827,6 +2204,7 @@
   // already-attached parcel on its own.
   function syncParcelVisibilityIfBelowThreshold(key) {
     if (parcelsMinZoom === null || map.getZoom() >= parcelsMinZoom) return;
+    if (!overlaysOn.canvassProgress) return; // nothing shows below threshold either way while this overlay is off
     var entry = parcelIndex[key];
     if (!entry) return;
     var show = currentWalked(key);
@@ -1948,6 +2326,12 @@
         });
         precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [], labelMarker: labelMarker };
         layer.on("click", function (e) {
+          // Only when Voting Precincts is both on AND the current clickable
+          // overlay (see setOverlayOn()/isOverlayClickActive()) -- with City
+          // council districts also on and set as current instead, a click
+          // here should do nothing so it can fall through to whatever's
+          // underneath, same as a click on empty water/background.
+          if (!isOverlayClickActive("precincts")) return;
           // Swipe-to-walk owns clicks on the map while armed -- without this
           // guard, a swipe stroke that starts on the open precinct's own
           // polygon (true for most swipes, since parcels sit inside it) can
@@ -1960,11 +2344,14 @@
           selectPrecinct(id);
         });
       }
-    }).addTo(map);
+    });
     // Precincts themselves are large, few in number, and meant to be visible
     // at every zoom level (unlike the individual parcels), so the shapes are
-    // added directly rather than going through viewport-windowed visibility.
-    // Their number labels are handled separately, gated on zoom (see above).
+    // added directly rather than going through viewport-windowed visibility
+    // -- gated only by the Voting Precincts overlay checkbox (see
+    // setOverlayOn()), not by zoom. Their number labels are handled
+    // separately, gated on zoom (see above).
+    if (overlaysOn.precincts) precinctsLayer.addTo(map);
   }
 
   // Precinct labels are single long-lived markers just toggled on/off
@@ -2025,8 +2412,10 @@
     if (precinctLabelsMinZoom === null) return;
     // The tiny epsilon guards against floating-point dust in the added zoom
     // delta (e.g. 14.999999999999998 instead of 15) landing a hair under
-    // the threshold right when a zoom exactly matches it.
-    var show = map.getZoom() >= precinctLabelsMinZoom - 1e-9;
+    // the threshold right when a zoom exactly matches it. Never show a
+    // number label for a precinct shape that isn't even on the map right
+    // now (Voting Precincts overlay off -- see setOverlayOn()).
+    var show = overlaysOn.precincts && map.getZoom() >= precinctLabelsMinZoom - 1e-9;
     Object.keys(precinctIndex).forEach(function (id) {
       var marker = precinctIndex[id].labelMarker;
       if (!marker) return;
@@ -2181,15 +2570,16 @@
   // in px -- font rendering (and therefore row height) varies enough across
   // browsers/OSes/zoom levels that a guessed constant would drift.
   function applyListHeightCap(listEl) {
-    var row = listEl.querySelector("li[data-precinct-id], li[data-key]");
+    var row = listEl.querySelector("li[data-precinct-id], li[data-district-id], li[data-key]");
     if (!row) return;
     var rowHeight = row.getBoundingClientRect().height;
     if (rowHeight > 0) listEl.style.maxHeight = (rowHeight * 5) + "px";
   }
   // Row height depends on font metrics, which can change on resize (e.g.
-  // phone rotation, browser zoom) -- recompute both lists' caps then too.
+  // phone rotation, browser zoom) -- recompute all three lists' caps then too.
   window.addEventListener("resize", function () {
     applyListHeightCap($("precinct-list"));
+    applyListHeightCap($("district-list"));
     applyListHeightCap($("address-list"));
   });
 
@@ -2285,6 +2675,126 @@
   $("precinct-list").addEventListener("click", function (e) {
     var li = e.target.closest("li[data-precinct-id]");
     if (li) selectPrecinct(li.dataset.precinctId);
+  });
+
+  // ================== CITY COUNCIL DISTRICTS ==================
+  // A fixed reference overlay -- static geometry with no per-district
+  // status/editing, so unlike precincts there's no fill color to compute,
+  // no panel, and no swipe-to-walk to guard against: just an outline that's
+  // either the plain district blue or (for whichever one is selected) the
+  // lighter selected blue.
+  function districtStyle(feature) {
+    var id = String(feature.properties[CONFIG.DISTRICT_ID_FIELD]);
+    var isSelected = id === selectedDistrictId;
+    return {
+      stroke: true,
+      color: isSelected ? DISTRICT_SELECTED_HEX : DISTRICT_BORDER_HEX,
+      weight: isSelected ? 4 : 2,
+      opacity: 1,
+      fill: false
+    };
+  }
+
+  function restyleDistrict(id) {
+    var d = districtIndex[id];
+    if (d && d.layer) d.layer.setStyle(districtStyle(d.feature));
+  }
+
+  function districtLabel(id) {
+    var d = districtIndex[id];
+    return (d && d.feature.properties[CONFIG.DISTRICT_LABEL_FIELD]) || ("District " + id);
+  }
+
+  function districtCouncilMember(id) {
+    var d = districtIndex[id];
+    return (d && d.feature.properties.NameCouncil) || "";
+  }
+
+  function addDistricts(districtsGeoJson) {
+    districtsLayer = L.geoJSON(districtsGeoJson, {
+      style: districtStyle,
+      onEachFeature: function (feature, layer) {
+        var id = String(feature.properties[CONFIG.DISTRICT_ID_FIELD]);
+        districtIndex[id] = { feature: feature, layer: layer };
+        layer.on("click", function (e) {
+          // Same click-routing rule as precincts (see addPrecincts) -- only
+          // acts when City council districts is both on and currently the
+          // clickable overlay.
+          if (!isOverlayClickActive("districts")) return;
+          L.DomEvent.stopPropagation(e);
+          selectDistrict(id);
+        });
+      }
+    });
+    // Same reasoning as precincts: few, large, fixed shapes meant to be
+    // visible at every zoom -- gated only by the overlay checkbox, never by
+    // zoom or viewport windowing.
+    if (overlaysOn.districts) districtsLayer.addTo(map);
+  }
+
+  function selectDistrict(id) {
+    var previous = selectedDistrictId;
+    selectedDistrictId = id;
+    if (previous && previous !== id) restyleDistrict(previous);
+    restyleDistrict(id);
+    highlightDistrictListItem(id);
+    var d = districtIndex[id];
+    if (d) {
+      try { map.flyToBounds(d.layer.getBounds(), { padding: [40, 40], duration: 0.5 }); } catch (e) { /* ignore */ }
+    }
+  }
+
+  // ================== DISTRICT LIST ==================
+  function buildDistrictList(filterText) {
+    var listEl = $("district-list");
+    var allIds = Object.keys(districtIndex);
+    var ids = allIds.slice().sort(function (a, b) { return Number(a) - Number(b); });
+
+    var q = (filterText || "").trim().toLowerCase();
+    if (q) {
+      ids = ids.filter(function (id) {
+        return id.toLowerCase().indexOf(q) !== -1 ||
+          districtLabel(id).toLowerCase().indexOf(q) !== -1 ||
+          districtCouncilMember(id).toLowerCase().indexOf(q) !== -1;
+      });
+    }
+
+    if (!allIds.length) {
+      listEl.innerHTML = '<li class="empty-msg">Loading districts&hellip;</li>';
+    } else if (!ids.length) {
+      listEl.innerHTML = '<li class="empty-msg">No districts match your search.</li>';
+    } else {
+      listEl.innerHTML = ids.map(districtRowHtml).join("");
+    }
+    applyListHeightCap(listEl);
+  }
+
+  function districtRowHtml(id) {
+    var member = districtCouncilMember(id);
+    return '<li data-district-id="' + escapeHtml(id) + '"' + (id === selectedDistrictId ? ' class="active"' : "") + '>' +
+      '<span class="status-dot" style="background:' + DISTRICT_BORDER_HEX + '"></span>' +
+      '<span class="precinct-id">' + escapeHtml(districtLabel(id)) + "</span>" +
+      (member ? '<span class="precinct-progress">' + escapeHtml(member) + "</span>" : "") +
+      "</li>";
+  }
+
+  function highlightDistrictListItem(id) {
+    var activeLi = null;
+    document.querySelectorAll("#district-list li").forEach(function (li) {
+      var isActive = !!(id && li.dataset.districtId === id);
+      li.classList.toggle("active", isActive);
+      if (isActive) activeLi = li;
+    });
+    if (activeLi) activeLi.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  $("district-search-input").addEventListener("input", function () {
+    buildDistrictList(this.value);
+  });
+
+  $("district-list").addEventListener("click", function (e) {
+    var li = e.target.closest("li[data-district-id]");
+    if (li) selectDistrict(li.dataset.districtId);
   });
 
   // ================== ADDRESS LIST (navigation only -- find & zoom to a house) ==================
