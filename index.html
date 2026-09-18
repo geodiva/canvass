@@ -248,11 +248,11 @@
     z-index: 10;
   }
 
-  /* "Current clickable overlay" and "Precinct canvassing progress" stay
-     pinned at the top in normal document order, each sized to its own
-     content. Everything below them -- the three search/list sections -- is
-     grouped into .sidebar-list-stack instead (see below), which is the part
-     that packs down against the bottom of the screen. */
+  /* "Current clickable overlay" and "Precinct Status" stay pinned at the
+     top in normal document order, each sized to its own content. Everything
+     below them -- the three search/list sections -- is grouped into
+     .sidebar-list-stack instead (see below), which is the part that packs
+     down against the bottom of the screen. */
   .sidebar-section {
     flex: 0 0 auto;
     display: flex;
@@ -464,6 +464,23 @@
     color: var(--muted);
     margin-bottom: 4px;
   }
+  /* Overlays' own title row also carries a small "click" hint, right-
+     justified against the section title -- a legend for the black outline
+     (.layers-choice-row-current-clickable) that marks whichever Overlays
+     row is the current clickable overlay, so it reads as "this outline
+     means clickable" rather than an unexplained box. */
+  .layers-section-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .layers-section-title-row .layers-section-title { margin-bottom: 0; }
+  .layers-section-title-hint {
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--ink);
+    border: 1.5px solid #000000;
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
   .layers-choice-row {
     display: flex;
     align-items: center;
@@ -504,6 +521,8 @@
     padding: 6px 8px 6px 10px;
     border-bottom: 1px solid var(--border);
   }
+  .layers-menu-title-group { display: flex; align-items: center; gap: 6px; }
+  .layers-menu-title-icon { display: flex; color: var(--muted); }
   .layers-menu-title { font-weight: 700; font-size: 0.8rem; }
   .layers-menu-close {
     background: none;
@@ -1070,7 +1089,7 @@
     </div>
     <div class="sidebar-section" id="precinct-progress-section">
       <div class="sidebar-header">
-        <h2>Precinct canvassing progress</h2>
+        <h2>Precinct Status</h2>
       </div>
       <div class="status-legend" id="precinct-legend">
         <div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-not-printed)"></span><span class="legend-label">Not Yet Printed</span><span class="legend-count" id="legend-count-not-printed">0</span></div>
@@ -2093,7 +2112,18 @@
         // to just a small icon (below) rather than removing it, so it's a
         // one-click toggle either direction, not a one-way dismissal.
         var header = L.DomUtil.create("div", "layers-menu-header", container);
-        L.DomUtil.create("span", "layers-menu-title", header).textContent = "Layers";
+        var titleGroup = L.DomUtil.create("span", "layers-menu-title-group", header);
+        // Same stacked-layers glyph as the collapsed state's own reopen icon
+        // (see reopenLink below) -- placed just to the left of the "Layers"
+        // title so the expanded header carries the same icon identity as the
+        // collapsed one, rather than a bare text label.
+        var titleIcon = L.DomUtil.create("span", "layers-menu-title-icon", titleGroup);
+        titleIcon.innerHTML =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+          '<polygon points="12 2 22 8.5 12 15 2 8.5 12 2"></polygon>' +
+          '<polyline points="2 15.5 12 22 22 15.5"></polyline>' +
+          '<polyline points="2 12 12 18.5 22 12"></polyline></svg>';
+        L.DomUtil.create("span", "layers-menu-title", titleGroup).textContent = "Layers";
         var closeBtn = L.DomUtil.create("button", "layers-menu-close", header);
         closeBtn.type = "button";
         closeBtn.setAttribute("aria-label", "Hide layers menu");
@@ -2105,7 +2135,9 @@
         // overlay is current is the more frequently-used choice day to day,
         // so it goes above the basemap picker rather than below it.
         var overlaysSection = L.DomUtil.create("div", "layers-section", body);
-        L.DomUtil.create("div", "layers-section-title", overlaysSection).textContent = "Overlays";
+        var overlaysTitleRow = L.DomUtil.create("div", "layers-section-title-row", overlaysSection);
+        L.DomUtil.create("div", "layers-section-title", overlaysTitleRow).textContent = "Overlays";
+        L.DomUtil.create("span", "layers-section-title-hint", overlaysTitleRow).textContent = "click";
         [
           { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
           { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
