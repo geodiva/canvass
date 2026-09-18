@@ -464,7 +464,7 @@
     color: var(--muted);
     margin-bottom: 4px;
   }
-  /* Overlays' own title row also carries a small "click" hint, right-
+  /* Overlays' own title row also carries a small "clickable" hint, right-
      justified against the section title -- a legend for the black outline
      (.layers-choice-row-current-clickable) that marks whichever Overlays
      row is the current clickable overlay, so it reads as "this outline
@@ -2137,7 +2137,7 @@
         var overlaysSection = L.DomUtil.create("div", "layers-section", body);
         var overlaysTitleRow = L.DomUtil.create("div", "layers-section-title-row", overlaysSection);
         L.DomUtil.create("div", "layers-section-title", overlaysTitleRow).textContent = "Overlays";
-        L.DomUtil.create("span", "layers-section-title-hint", overlaysTitleRow).textContent = "click";
+        L.DomUtil.create("span", "layers-section-title-hint", overlaysTitleRow).textContent = "clickable";
         [
           { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
           { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
@@ -3658,14 +3658,11 @@
       highlightDistrictListItem(null);
       restyleDistrict(id);
     }
-    // Unlike closePrecinctPanel's zoomOut (which just backs out one zoom
-    // level -- a precinct selection typically starts from a view that's
-    // already reasonably close), a district's selection flies in from the
-    // full city view to fit just its own bounds, often a much bigger jump --
-    // so Cancel/Escape here flies all the way back out to that same initial
-    // city view (the Home control's own zoomToInitialCityView()) rather than
-    // just one level back, which could still leave you well inside a single
-    // district's bounds.
+    // Same as closePrecinctPanel's own zoomOut -- flies all the way back out
+    // to the initial city-wide view (the Home control's own
+    // zoomToInitialCityView()) rather than just backing out one zoom level,
+    // since a selection can fly in from much farther away than one level
+    // would undo.
     if (opts.zoomOut) zoomToInitialCityView();
   }
 
@@ -3716,23 +3713,12 @@
     }
   }
 
-  // Closing a panel (Cancel or Save) backs the map out one zoom level from
-  // wherever the fly-to-fit-bounds flight (zoomToFitPrecinct/
-  // zoomToFitDistrict) flew it in to -- so once you're done looking at
-  // something, you can immediately see more of what's around it instead of
-  // staying zoomed all the way in. Shared by the precinct panel and the
-  // district panel; not used when a panel is simply switching to a
-  // *different* precinct/district (see openPrecinctPanel/openDistrictPanel),
-  // since that flies to a new set of bounds right afterward anyway.
-  function zoomOutOnPanelClose() {
-    if (!map) return;
-    try {
-      map.setZoom(Math.max(map.getZoom() - 1, map.getMinZoom()), { animate: true });
-    } catch (e) { /* ignore */ }
-  }
-
   // opts:
-  //   zoomOut          -- back the map out a level after closing (Cancel/Save/Escape)
+  //   zoomOut          -- fly back out to the initial city-wide view after
+  //                       closing (Cancel/Save/Escape) -- see the comment on
+  //                       the matching closeDistrictPanel opts.zoomOut for
+  //                       why this flies all the way back rather than just
+  //                       backing out one zoom level
   //   keepSelectionState -- skip clearing selectedPrecinctId/the glow highlight/the
   //                         list's "active" row. Used only when openPrecinctPanel()
   //                         is closing the PREVIOUS precinct because the panel is
@@ -3781,9 +3767,9 @@
       highlightPrecinctListItem(null);
       restylePrecinctParcels(id); // turn this precinct's parcel outlines back off
       // Also turn its parcels' labels back off right away -- same reasoning
-      // as the immediate call in selectPrecinct(): the zoom-out below may
-      // not actually change the zoom (e.g. already at minZoom), so it can't
-      // always be relied on to trigger this via zoomend.
+      // as the immediate call in selectPrecinct(): flying back to the
+      // initial view below may not actually change the zoom (e.g. already
+      // there), so it can't always be relied on to trigger this via zoomend.
       updateVisibleParcels();
     }
     restylePrecinct(id);
@@ -3793,7 +3779,7 @@
     // discarding a previewed status change).
     updatePrecinctListRow(id);
     renderPrecinctLegend();
-    if (opts.zoomOut) zoomOutOnPanelClose();
+    if (opts.zoomOut) zoomToInitialCityView();
   }
 
   function updatePrecinctStatusButtons() {
