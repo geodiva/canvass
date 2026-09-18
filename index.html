@@ -1087,13 +1087,6 @@
         </div>
         <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
       </div>
-      <div class="sidebar-section" id="district-list-section" hidden>
-        <div class="sidebar-header">
-          <h2>City council districts</h2>
-          <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
-        </div>
-        <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
-      </div>
       <div class="sidebar-section" id="address-list-section">
         <div class="sidebar-header">
           <h2>Address</h2>
@@ -1101,6 +1094,18 @@
         </div>
         <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
         <div class="sidebar-footer" id="count-footer">&nbsp;</div>
+      </div>
+      <!-- Order here (Voting precincts / Address / City council districts)
+           deliberately matches the Layers menu's own Overlays list order
+           (Voting Precincts / Canvass progress / City council districts) --
+           see .sidebar-list-stack above -- so the two stay in the same
+           sequence at a glance. -->
+      <div class="sidebar-section" id="district-list-section" hidden>
+        <div class="sidebar-header">
+          <h2>City council districts</h2>
+          <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
+        </div>
+        <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
       </div>
     </div>
   </aside>
@@ -2096,18 +2101,9 @@
 
         var body = L.DomUtil.create("div", "layers-menu-body", container);
 
-        var basemapSection = L.DomUtil.create("div", "layers-section", body);
-        L.DomUtil.create("div", "layers-section-title", basemapSection).textContent = "Basemap";
-        Object.keys(baseLayers).forEach(function (name) {
-          var row = L.DomUtil.create("label", "layers-choice-row", basemapSection);
-          var input = L.DomUtil.create("input", "", row);
-          input.type = "radio";
-          input.name = "a4m-basemap";
-          input.value = name;
-          L.DomEvent.on(input, "change", function () { if (input.checked) setBasemap(name); });
-          row.appendChild(document.createTextNode(" " + name));
-        });
-
+        // Overlays first, Basemap second -- which layer to click and which
+        // overlay is current is the more frequently-used choice day to day,
+        // so it goes above the basemap picker rather than below it.
         var overlaysSection = L.DomUtil.create("div", "layers-section", body);
         L.DomUtil.create("div", "layers-section-title", overlaysSection).textContent = "Overlays";
         [
@@ -2121,6 +2117,18 @@
           input.checked = overlaysOn[ov.key];
           L.DomEvent.on(input, "change", function () { setOverlayOn(ov.key, input.checked); });
           row.appendChild(document.createTextNode(" " + ov.label));
+        });
+
+        var basemapSection = L.DomUtil.create("div", "layers-section", body);
+        L.DomUtil.create("div", "layers-section-title", basemapSection).textContent = "Basemap";
+        Object.keys(baseLayers).forEach(function (name) {
+          var row = L.DomUtil.create("label", "layers-choice-row", basemapSection);
+          var input = L.DomUtil.create("input", "", row);
+          input.type = "radio";
+          input.name = "a4m-basemap";
+          input.value = name;
+          L.DomEvent.on(input, "change", function () { if (input.checked) setBasemap(name); });
+          row.appendChild(document.createTextNode(" " + name));
         });
 
         // The collapsed state's own reopen affordance -- a small icon-only
@@ -3618,7 +3626,15 @@
       highlightDistrictListItem(null);
       restyleDistrict(id);
     }
-    if (opts.zoomOut) zoomOutOnPanelClose();
+    // Unlike closePrecinctPanel's zoomOut (which just backs out one zoom
+    // level -- a precinct selection typically starts from a view that's
+    // already reasonably close), a district's selection flies in from the
+    // full city view to fit just its own bounds, often a much bigger jump --
+    // so Cancel/Escape here flies all the way back out to that same initial
+    // city view (the Home control's own zoomToInitialCityView()) rather than
+    // just one level back, which could still leave you well inside a single
+    // district's bounds.
+    if (opts.zoomOut) zoomToInitialCityView();
   }
 
   function positionDistrictPanel(id) {
