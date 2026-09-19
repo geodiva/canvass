@@ -375,6 +375,17 @@
     background: linear-gradient(180deg, var(--header-tint), transparent 85%);
   }
   .sidebar-header h2 { margin: 0 0 8px; font-size: 0.95rem; color: var(--ink); }
+  /* The Overlays section header doubles as a title + right-justified
+     "clickable" hint row (reusing .layers-section-title-row/-hint from the
+     Layers menu's own styling below) -- override the plain header's own
+     bottom margin on the h2 so it centers against the hint instead of
+     leaving a gap under it. */
+  .sidebar-header.layers-section-title-row h2 { margin: 0; }
+  /* Padding for the moved-in Overlays checkbox rows (.layers-choice-row
+     etc., styled further down) -- mirrors .clickable-overlay-choices'
+     own padding just below, the closest existing precedent for a
+     checkbox/radio list sitting directly in a sidebar section. */
+  .sidebar-overlays-choices { padding: 6px 14px 12px; }
   /* Voting Precincts, Canvass progress, and City council districts each get
      their own tint instead of the shared --header-tint above, so each
      overlay's sidebar section(s) read as visually paired with that overlay's
@@ -1171,6 +1182,23 @@
   <div id="map"></div>
   <div id="zoom-level-indicator" hidden></div>
   <aside class="sidebar">
+    <!-- Moved here from the Layers menu (top-right map control) per explicit
+         request, so it's visible without opening that menu at all -- see
+         buildOverlaysChoices() in the script below, which is what actually
+         populates it now. -->
+    <div class="sidebar-section" id="sidebar-overlays-section">
+      <div class="sidebar-header layers-section-title-row">
+        <h2>Overlays</h2>
+        <span class="layers-section-title-hint">clickable</span>
+      </div>
+      <div class="sidebar-overlays-choices" id="sidebar-overlays-choices"></div>
+    </div>
+    <!-- Temporarily disabled (explicit request) now that the Overlays
+         section above already offers the same "pick which overlay is
+         currently clickable" interaction via a click on the overlay's own
+         name -- kept in the DOM/markup, and still kept up to date under the
+         hood, purely so re-enabling it later is a one-line change (see
+         updateClickableOverlayState()). -->
     <div class="sidebar-section" id="clickable-overlay-section" hidden>
       <div class="sidebar-header">
         <h2>Current clickable overlay</h2>
@@ -1920,6 +1948,7 @@
     // Settings panel) can switch this once it's fetched, via setBasemap().
     setBasemap(currentSettings.basemap || DEFAULT_SETTINGS.basemap);
 
+    buildOverlaysChoices($("sidebar-overlays-choices"));
     addLayersControl();
     addLocateControl();
     addHomeControl();
@@ -2270,31 +2299,73 @@
     $("zoom-level-indicator").textContent = "Zoom " + map.getZoom().toFixed(2);
   }
 
+  // ================== OVERLAYS (sidebar section) ==================
+  // Builds the Overlays checkbox rows into the given container -- used once,
+  // for the sidebar's own "Overlays" section (see the top of the sidebar
+  // markup). This used to be built inside the Layers menu control below,
+  // but moved out to the sidebar per explicit request, so it's visible
+  // without opening that menu at all.
+  function buildOverlaysChoices(container) {
+    [
+      { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
+      { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
+      { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
+    ].forEach(function (ov) {
+      // A plain <div> row rather than a <label> -- a <label> forwards a
+      // click anywhere inside it to its child <input>, which used to
+      // mean clicking the overlay's NAME toggled it on/off exactly like
+      // clicking the checkbox. Splitting the two apart frees up the name
+      // to mean something else instead: picking this overlay as the
+      // current clickable one (see setCurrentClickableOverlay), while
+      // the on/off toggle itself stays scoped to just the checkbox --
+      // plus a little padding around it (.layers-choice-checkbox-hit,
+      // itself a small <label> so that padding still counts as "the
+      // checkbox" for click purposes) so it's not a hairline target.
+      var row = L.DomUtil.create("div", "layers-choice-row " + ov.tintClass, container);
+      var checkboxHit = L.DomUtil.create("label", "layers-choice-checkbox-hit", row);
+      var input = L.DomUtil.create("input", "", checkboxHit);
+      input.type = "checkbox";
+      input.checked = overlaysOn[ov.key];
+      L.DomEvent.on(input, "change", function () { setOverlayOn(ov.key, input.checked); });
+      var labelText = L.DomUtil.create("span", "layers-choice-label-text", row);
+      labelText.textContent = ov.label;
+      // Only the two CLICKABLE_OVERLAYS entries have a "current
+      // clickable" concept to pick -- clicking "Canvass progress"'s name
+      // has nothing to select, so it's left as a non-interactive label.
+      if (CLICKABLE_OVERLAYS.indexOf(ov.key) !== -1) {
+        L.DomEvent.on(labelText, "click", function () { setCurrentClickableOverlay(ov.key); });
+      }
+    });
+  }
+
   // ================== LAYERS MENU ==================
   // A hand-built control rather than Leaflet's own L.control.layers(): the
-  // spec calls for section headings ("Basemap"/"Overlays") the built-in
-  // control has no support for, and the Overlays section needs behavior
-  // (showing/hiding whole sidebar sections, gating which shape a map click
-  // selects) well beyond what the built-in control's own add/remove-layer
-  // events are meant for. Easier to just own the whole thing -- same
-  // approach as the locate control just below.
+  // spec calls for a section heading ("Basemap") the built-in control has no
+  // support for. Now that Overlays lives in the sidebar (above), this menu
+  // is just the Basemap picker -- still worth owning by hand rather than
+  // swapping back to the built-in control, to keep the same collapse-to-icon
+  // behavior and visual style as the rest of this app's custom controls.
   function addLayersControl() {
     var LayersControl = L.Control.extend({
       options: { position: "topright" },
       onAdd: function () {
-        var container = L.DomUtil.create("div", "leaflet-bar leaflet-control layers-menu");
+        // Starts collapsed (just the small icon) -- now that Overlays lives
+        // in the sidebar instead, the Basemap-only menu left here is a much
+        // less frequently needed control, so it stays tucked away until
+        // explicitly reopened rather than taking up top-right map space by
+        // default.
+        var container = L.DomUtil.create("div", "leaflet-bar leaflet-control layers-menu layers-menu-collapsed");
         // Same as Leaflet's own layers control: without these, dragging or
         // double-clicking inside this control would drag/zoom the map
         // underneath it.
         L.DomEvent.disableClickPropagation(container);
         L.DomEvent.disableScrollPropagation(container);
 
-        // A small header with its own close (x) button -- shown/expanded by
-        // default (it's the whole point of the menu), but with an explicit
-        // way to tuck it away when it's in the way, same as the Settings
-        // panel's own close button. Closing collapses the whole control down
-        // to just a small icon (below) rather than removing it, so it's a
-        // one-click toggle either direction, not a one-way dismissal.
+        // A small header with its own close (x) button -- lets you tuck the
+        // menu away again after opening it, same as the Settings panel's own
+        // close button. Closing collapses the whole control down to just a
+        // small icon (below) rather than removing it, so it's a one-click
+        // toggle either direction, not a one-way dismissal.
         var header = L.DomUtil.create("div", "layers-menu-header", container);
         var titleGroup = L.DomUtil.create("span", "layers-menu-title-group", header);
         // Same stacked-layers glyph as the collapsed state's own reopen icon
@@ -2314,44 +2385,6 @@
         closeBtn.innerHTML = "&times;";
 
         var body = L.DomUtil.create("div", "layers-menu-body", container);
-
-        // Overlays first, Basemap second -- which layer to click and which
-        // overlay is current is the more frequently-used choice day to day,
-        // so it goes above the basemap picker rather than below it.
-        var overlaysSection = L.DomUtil.create("div", "layers-section", body);
-        var overlaysTitleRow = L.DomUtil.create("div", "layers-section-title-row", overlaysSection);
-        L.DomUtil.create("div", "layers-section-title", overlaysTitleRow).textContent = "Overlays";
-        L.DomUtil.create("span", "layers-section-title-hint", overlaysTitleRow).textContent = "clickable";
-        [
-          { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
-          { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
-          { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
-        ].forEach(function (ov) {
-          // A plain <div> row rather than a <label> -- a <label> forwards a
-          // click anywhere inside it to its child <input>, which used to
-          // mean clicking the overlay's NAME toggled it on/off exactly like
-          // clicking the checkbox. Splitting the two apart frees up the name
-          // to mean something else instead: picking this overlay as the
-          // current clickable one (see setCurrentClickableOverlay), while
-          // the on/off toggle itself stays scoped to just the checkbox --
-          // plus a little padding around it (.layers-choice-checkbox-hit,
-          // itself a small <label> so that padding still counts as "the
-          // checkbox" for click purposes) so it's not a hairline target.
-          var row = L.DomUtil.create("div", "layers-choice-row " + ov.tintClass, overlaysSection);
-          var checkboxHit = L.DomUtil.create("label", "layers-choice-checkbox-hit", row);
-          var input = L.DomUtil.create("input", "", checkboxHit);
-          input.type = "checkbox";
-          input.checked = overlaysOn[ov.key];
-          L.DomEvent.on(input, "change", function () { setOverlayOn(ov.key, input.checked); });
-          var labelText = L.DomUtil.create("span", "layers-choice-label-text", row);
-          labelText.textContent = ov.label;
-          // Only the two CLICKABLE_OVERLAYS entries have a "current
-          // clickable" concept to pick -- clicking "Canvass progress"'s name
-          // has nothing to select, so it's left as a non-interactive label.
-          if (CLICKABLE_OVERLAYS.indexOf(ov.key) !== -1) {
-            L.DomEvent.on(labelText, "click", function () { setCurrentClickableOverlay(ov.key); });
-          }
-        });
 
         var basemapSection = L.DomUtil.create("div", "layers-section", body);
         L.DomUtil.create("div", "layers-section-title", basemapSection).textContent = "Basemap";
@@ -2515,27 +2548,38 @@
       currentClickableOverlay = onKeys[0];
     }
 
+    // Temporarily disabled (explicit request): the sidebar's own Overlays
+    // section (see buildOverlaysChoices) already offers the same "pick
+    // which overlay is currently clickable" interaction via a click on the
+    // overlay's own name, which makes this radio-list section a redundant
+    // second way to do the same thing for now. renderClickableOverlayChoices
+    // still runs so its content stays correct under the hood -- re-enabling
+    // this is just deleting the "= true" below.
     var section = $("clickable-overlay-section");
     var showSelector = onKeys.length > 1;
-    section.hidden = !showSelector;
+    section.hidden = true;
     if (showSelector) renderClickableOverlayChoices(onKeys);
     applyClickableInteractivity();
     updateLayersMenuClickableOutline();
   }
 
   // Puts the black "current clickable overlay" outline (see
-  // .layers-choice-row-current-clickable) on whichever Overlays row in the
-  // Layers menu matches currentClickableOverlay, and off every other row.
-  // Called from every place currentClickableOverlay can change: here (covers
+  // .layers-choice-row-current-clickable) on whichever Overlays row matches
+  // currentClickableOverlay, and off every other row. Despite the name (kept
+  // for now to minimize churn -- this predates the Overlays section's move
+  // into the sidebar), it no longer looks specifically inside the Layers
+  // menu: the row classes it targets are unique across the whole page, and
+  // the Overlays rows themselves are now static sidebar markup built once at
+  // boot (see buildOverlaysChoices), not conditionally re-created the way
+  // the Layers menu control's own contents are. Called from every place
+  // currentClickableOverlay can change: here (covers
   // updateClickableOverlayState()'s own reassignments and, transitively,
   // setCurrentClickableOverlay()) and directly from the clickable-overlay
   // radio buttons' own change handler below, which sets the variable without
   // going through updateClickableOverlayState().
   function updateLayersMenuClickableOutline() {
-    var container = document.querySelector(".layers-menu");
-    if (!container) return; // control not built yet
     CLICKABLE_OVERLAYS.forEach(function (key) {
-      var row = container.querySelector(".layers-choice-row-" + key);
+      var row = document.querySelector(".layers-choice-row-" + key);
       if (row) row.classList.toggle("layers-choice-row-current-clickable", key === currentClickableOverlay);
     });
   }
