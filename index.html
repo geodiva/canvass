@@ -234,12 +234,25 @@
     pointer-events: none;
   }
   #zoom-level-indicator[hidden] { display: none; }
-  #map.walk-armed { cursor: crosshair; touch-action: none; }
+  /* Swiping over parcels to mark them walked is a "painting" motion, so
+     walk mode swaps the pointer for a small paintbrush glyph (a self-
+     contained SVG data URI -- cursor images can't pick up the page's own
+     CSS variables, so its colors are hardcoded to match the light-mode
+     accent/muted palette) instead of a generic crosshair. The two numbers
+     after the url are the cursor's hotspot -- the bristle tip, roughly
+     where paint would actually land -- with "crosshair" kept as the
+     fallback for a browser that can't load the custom image. */
+  #map.walk-armed {
+    cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNyAxNGMtMS42NiAwLTMgMS4zNC0zIDMgMCAxLjMxLTEuMTYgMi0yIDIgLjkyIDEuMjIgMi40OSAyIDQgMiAyLjIxIDAgNC0xLjc5IDQtNCAwLTEuNjYtMS4zNC0zLTMtM3oiIGZpbGw9IiNFMDYyMkIiIHN0cm9rZT0iIzFDMkIzOCIgc3Ryb2tlLXdpZHRoPSIwLjYiLz48cGF0aCBkPSJNMjAuNzEgNC42M2wtMS4zNC0xLjM0YTEgMSAwIDAgMC0xLjQxIDBMOSAxMi4yNSAxMS43NSAxNWw4Ljk2LTguOTZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxeiIgZmlsbD0iIzhGQTNBRSIgc3Ryb2tlPSIjMUMyQjM4IiBzdHJva2Utd2lkdGg9IjAuNiIvPjwvc3ZnPg==") 4 20, crosshair;
+    touch-action: none;
+  }
   /* Leaflet adds its own "leaflet-interactive" class (cursor: pointer) to
      whichever canvas/path is under the mouse while hovering an interactive
      parcel or precinct shape -- which is most of the map -- and that would
-     otherwise beat the crosshair above. */
-  #map.walk-armed .leaflet-interactive { cursor: crosshair !important; }
+     otherwise beat the brush cursor above. */
+  #map.walk-armed .leaflet-interactive {
+    cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNyAxNGMtMS42NiAwLTMgMS4zNC0zIDMgMCAxLjMxLTEuMTYgMi0yIDIgLjkyIDEuMjIgMi40OSAyIDQgMiAyLjIxIDAgNC0xLjc5IDQtNCAwLTEuNjYtMS4zNC0zLTMtM3oiIGZpbGw9IiNFMDYyMkIiIHN0cm9rZT0iIzFDMkIzOCIgc3Ryb2tlLXdpZHRoPSIwLjYiLz48cGF0aCBkPSJNMjAuNzEgNC42M2wtMS4zNC0xLjM0YTEgMSAwIDAgMC0xLjQxIDBMOSAxMi4yNSAxMS43NSAxNWw4Ljk2LTguOTZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxeiIgZmlsbD0iIzhGQTNBRSIgc3Ryb2tlPSIjMUMyQjM4IiBzdHJva2Utd2lkdGg9IjAuNiIvPjwvc3ZnPg==") 4 20, crosshair !important;
+  }
 
   /* Kills the faint moving grid of hairline seams between adjacent map
      tiles that shows up mainly on mobile Safari/retina screens, worse when
@@ -336,6 +349,14 @@
      class onto whichever section is actually last among the visible ones
      (updateSidebarSectionBorders(), called by setOverlayOn()). */
   .sidebar-section.sidebar-section-last { border-bottom: none; }
+  /* A little breathing room between the three search/list sections
+     (Voting precincts / Address / City council districts) -- previously
+     just the hairline border above separated them, with the next section's
+     header sitting flush against it. Same ":not(.sidebar-section-last)"
+     exclusion as the border-removal rule above, so the bottom-anchored
+     stack still ends flush against the bottom of the sidebar rather than
+     leaving trailing space under the last visible section. */
+  .sidebar-list-stack > .sidebar-section:not(.sidebar-section-last) { margin-bottom: 8px; }
   /* .sidebar-section sets display:flex above, which (same specificity as the
      browser's own "[hidden]{display:none}" rule, and later in the cascade)
      would otherwise win and keep a "hidden" section visible -- same fix
@@ -529,6 +550,25 @@
     white-space: nowrap;
   }
   .layers-choice-row input { accent-color: var(--select); margin: 0; }
+  /* The overlay rows' checkbox now lives in its own small <label>, sized to
+     just the checkbox plus a few px of padding -- "the checkbox" as a click
+     target, without the whole row (name text included) forwarding clicks to
+     it the way a single all-encompassing <label> used to. */
+  .layers-choice-checkbox-hit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    margin: -4px 0;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .layers-choice-checkbox-hit:hover { background: var(--paper); }
+  /* The name text itself is a separate click target for the two
+     CLICKABLE_OVERLAYS entries -- clicking it picks this overlay as the
+     current clickable one (setCurrentClickableOverlay) instead of toggling
+     it on/off. */
+  .layers-choice-label-text { cursor: pointer; }
   /* Same gradient wash (and the same three colors) as the matching sidebar
      section header(s) -- see the #precinct-list-section/#address-list-
      section/#district-list-section/.sidebar-header rules above -- so each
@@ -1373,7 +1413,7 @@
   var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
   var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
   var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
-  var UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000; // how often to check whether a newer index.html has been deployed
+  var UPDATE_CHECK_INTERVAL_MS = 60 * 1000; // how often to check whether a newer index.html has been deployed
   var updateAvailableVersionTag = null; // set once a version change is detected, so the reload button can't fire twice on a stale check
   var selectedAddressKey = null;
   var selectedPrecinctId = null;
@@ -2287,12 +2327,30 @@
           { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
           { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
         ].forEach(function (ov) {
-          var row = L.DomUtil.create("label", "layers-choice-row " + ov.tintClass, overlaysSection);
-          var input = L.DomUtil.create("input", "", row);
+          // A plain <div> row rather than a <label> -- a <label> forwards a
+          // click anywhere inside it to its child <input>, which used to
+          // mean clicking the overlay's NAME toggled it on/off exactly like
+          // clicking the checkbox. Splitting the two apart frees up the name
+          // to mean something else instead: picking this overlay as the
+          // current clickable one (see setCurrentClickableOverlay), while
+          // the on/off toggle itself stays scoped to just the checkbox --
+          // plus a little padding around it (.layers-choice-checkbox-hit,
+          // itself a small <label> so that padding still counts as "the
+          // checkbox" for click purposes) so it's not a hairline target.
+          var row = L.DomUtil.create("div", "layers-choice-row " + ov.tintClass, overlaysSection);
+          var checkboxHit = L.DomUtil.create("label", "layers-choice-checkbox-hit", row);
+          var input = L.DomUtil.create("input", "", checkboxHit);
           input.type = "checkbox";
           input.checked = overlaysOn[ov.key];
           L.DomEvent.on(input, "change", function () { setOverlayOn(ov.key, input.checked); });
-          row.appendChild(document.createTextNode(" " + ov.label));
+          var labelText = L.DomUtil.create("span", "layers-choice-label-text", row);
+          labelText.textContent = ov.label;
+          // Only the two CLICKABLE_OVERLAYS entries have a "current
+          // clickable" concept to pick -- clicking "Canvass progress"'s name
+          // has nothing to select, so it's left as a non-interactive label.
+          if (CLICKABLE_OVERLAYS.indexOf(ov.key) !== -1) {
+            L.DomEvent.on(labelText, "click", function () { setCurrentClickableOverlay(ov.key); });
+          }
         });
 
         var basemapSection = L.DomUtil.create("div", "layers-section", body);
