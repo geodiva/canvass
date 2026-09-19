@@ -576,7 +576,15 @@
      to just this one small icon button (matching the locate/home controls'
      own size and hover style) instead of removing the menu outright -- one
      click either direction toggles between the two. */
-  .layers-menu-reopen-link {
+  /* Scoped to ".layers-menu .layers-menu-reopen-link" (not just the bare
+     class) so this "hidden by default" rule actually wins the specificity
+     fight against Leaflet's own ".leaflet-bar a { display: block; }" --
+     that rule matches every <a> in the control (this link included) and,
+     at equal-or-higher specificity than a single class selector, was
+     silently overriding a plain ".layers-menu-reopen-link { display: none }"
+     and leaving this icon visible under the Basemap list even while the
+     menu was fully expanded. */
+  .layers-menu .layers-menu-reopen-link {
     display: none;
     align-items: center;
     justify-content: center;
