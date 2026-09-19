@@ -168,6 +168,43 @@
   }
   #demo-banner.show { display: block; }
 
+  /* ---------- update-available toast ---------- */
+  /* Deliberately its own fixed-position element rather than folded into
+     #demo-banner -- main.layout.with-banner already computes its height
+     as "100% minus the banner's fixed height", and this toast needs to be
+     able to appear/disappear without perturbing that (or any other)
+     layout math. */
+  .update-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    z-index: 1500;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 10px 12px 10px 16px;
+    font-size: 0.84rem;
+  }
+  .update-toast[hidden] { display: none; }
+  #update-toast-btn {
+    border: none;
+    background: var(--select);
+    color: #fff;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #update-toast-btn:hover { filter: brightness(1.08); }
+
   /* ---------- layout ---------- */
   main.layout {
     height: calc(100% - 52px);
@@ -1077,6 +1114,11 @@
 </div>
 <div id="demo-banner">Demo mode &mdash; not connected to a Google Sheet yet. See README to wire up the Apps Script backend. Saves are kept only in this browser.</div>
 
+<div id="update-toast" class="update-toast" hidden role="status">
+  <span id="update-toast-text">New version available</span>
+  <button id="update-toast-btn" type="button">Click to update</button>
+</div>
+
 <main class="layout" id="main-layout">
   <div id="map"></div>
   <div id="zoom-level-indicator" hidden></div>
@@ -1323,6 +1365,8 @@
   var parcelWalkedData = {};     // address(lowercased) -> { walked, updatedAt, updatedBy }
   var lastSyncAt = null;         // server timestamp of the last successful full/partial data fetch
   var SYNC_POLL_MS = 20000;      // how often to check the Sheet for other canvassers' updates
+  var UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000; // how often to check whether a newer index.html has been deployed
+  var updateAvailableVersionTag = null; // set once a version change is detected, so the reload button can't fire twice on a stale check
   var selectedAddressKey = null;
   var selectedPrecinctId = null;
   var selectedDistrictId = null;
@@ -1691,6 +1735,93 @@
   }
 
   // ================== MAP ==================
+  // A fresh page load fires off dozens of tile requests to OpenStreetMap/Esri
+  // at once, and a handful of those routinely fail outright (a slow/flaky
+  // connection, a momentary server hiccup, a rate limit) rather than just
+  // loading slowly -- this is what shows up as "most of the time when I
+  // refresh, not all the basemap tiles display": a scattering of grid
+  // squares left permanently blank. Leaflet does not retry a tile that
+  // errors out on its own; it just leaves that <img> showing nothing until
+  // something else (a pan/zoom past it and back) happens to ask for it
+  // again. Retrying the failed tile's own image request a few times with a
+  // short backoff clears this up automatically, without the user needing to
+  // notice and manually pan/zoom to force a reload. Applied to every base
+  // layer below (attachTileRetry(...)), not just the default Streets one,
+  // since Hybrid/Satellite hit the same kind of transient failures.
+  function attachTileRetry(layer) {
+    var retryCounts = new WeakMap();
+    var MAX_RETRIES = 4;
+    layer.on("tileerror", function (e) {
+      var tile = e.tile;
+      if (!tile) return;
+      var count = retryCounts.get(tile) || 0;
+      if (count >= MAX_RETRIES) return; // give up quietly after a few tries -- a permanently blank tile beats an endless retry loop
+      retryCounts.set(tile, count + 1);
+      var delay = 300 * Math.pow(2, count); // 300ms, 600ms, 1200ms, 2400ms
+      setTimeout(function () {
+        // Re-assigning src is what actually makes the browser retry the
+        // request; a cache-busting param stops it from just replaying the
+        // same failed response out of its own image cache.
+        var baseUrl = tile.src.split("?")[0];
+        tile.src = baseUrl + "?a4mretry=" + (count + 1) + "-" + Date.now();
+      }, delay);
+    });
+    return layer;
+  }
+
+  // ---- "new version deployed" checker ----
+  // GitHub Pages just serves index.html as a static file, so there's no
+  // push notification when a new one goes live -- a canvasser who leaves a
+  // tab open for hours (very normal for this app) can end up working
+  // against a stale copy with no way to know it's out of date. Instead we
+  // occasionally ask the server "has this file changed since I loaded it?"
+  // via a cheap HEAD request, and if so, put up a dismiss-free prompt to
+  // reload rather than silently doing it for them (a silent reload mid-edit
+  // would blow away anything they haven't saved yet).
+  var lastKnownIndexVersionTag = null; // ETag/Last-Modified captured right after boot, as a baseline to compare against
+
+  function fetchIndexVersionTag() {
+    // The cache-busting query param matters as much as `cache: "no-store"`
+    // does: "no-store" only stops *this browser* from answering out of its
+    // own cache, but GitHub Pages sits behind a CDN (Fastly), and a CDN
+    // edge cache keys on the full request URL -- a fresh, never-seen-before
+    // query string forces the edge to actually go check with the origin
+    // instead of handing back a HEAD response it cached minutes ago.
+    var url = location.pathname + "?a4mcheck=" + Date.now();
+    return fetch(url, { method: "HEAD", cache: "no-store" }).then(function (res) {
+      if (!res.ok) return null;
+      // ETag is the more precise signal when present; Last-Modified is the
+      // fallback for a server/CDN that doesn't send one.
+      return res.headers.get("ETag") || res.headers.get("Last-Modified") || null;
+    }).catch(function () {
+      return null; // offline, request blocked, etc. -- just quietly try again next interval
+    });
+  }
+
+  function checkForNewVersion() {
+    if (updateAvailableVersionTag) return; // already showing the prompt -- no need to keep checking
+    fetchIndexVersionTag().then(function (tag) {
+      if (!tag) return; // couldn't get a usable signal this round
+      if (lastKnownIndexVersionTag === null) {
+        lastKnownIndexVersionTag = tag; // first successful check just establishes the baseline to compare future checks against
+        return;
+      }
+      if (tag !== lastKnownIndexVersionTag) {
+        updateAvailableVersionTag = tag;
+        $("update-toast").hidden = false;
+      }
+    });
+  }
+
+  function attachUpdateChecker() {
+    checkForNewVersion(); // establish the baseline shortly after boot
+    setInterval(checkForNewVersion, UPDATE_CHECK_INTERVAL_MS);
+  }
+
+  $("update-toast-btn").addEventListener("click", function () {
+    location.reload();
+  });
+
   function initMap() {
     // preferCanvas: this app can be handed real parcel layers with many
     // thousands of polygons; Canvas rendering stays smooth where SVG (the
@@ -1702,38 +1833,38 @@
     // desktop neighborhood zoom.
     map = L.map("map", { zoomControl: true, preferCanvas: true, minZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
 
-    var streetsLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    var streetsLayer = attachTileRetry(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    });
+    }));
 
     var ESRI_ATTRIBUTION = "Imagery &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, and the GIS community";
 
-    var satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    var satelliteLayer = attachTileRetry(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
       maxZoom: 20,
       maxNativeZoom: 19,
       attribution: ESRI_ATTRIBUTION
-    });
+    }));
 
     // Hybrid = satellite imagery + Esri's free reference overlays (roads with
     // street names, place/city labels) stacked on top -- same free, no-API-key
     // Esri service as the plain satellite layer, just combined into one group
     // so it behaves as a single base-layer choice. This is the default view.
-    var hybridImagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    var hybridImagery = attachTileRetry(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
       maxZoom: 20,
       maxNativeZoom: 19,
       attribution: ESRI_ATTRIBUTION
-    });
-    var transportationLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {
+    }));
+    var transportationLabels = attachTileRetry(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {
       maxZoom: 20,
       maxNativeZoom: 19,
       attribution: ESRI_ATTRIBUTION
-    });
-    var placeLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
+    }));
+    var placeLabels = attachTileRetry(L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
       maxZoom: 20,
       maxNativeZoom: 19,
       attribution: ESRI_ATTRIBUTION
-    });
+    }));
     var hybridLayer = L.layerGroup([hybridImagery, transportationLabels, placeLabels]);
 
     baseLayers = { "Hybrid": hybridLayer, "Satellite": satelliteLayer, "Streets": streetsLayer };
@@ -1857,6 +1988,11 @@
       // periodically pull just what's changed since our last check (instead
       // of re-fetching everything) and quietly patch it in.
       if (!DEMO_MODE) setInterval(pollForUpdates, SYNC_POLL_MS);
+
+      // Checked regardless of demo mode -- this is about the static
+      // index.html file itself being redeployed, which has nothing to do
+      // with whether a Google Sheet backend is wired up.
+      attachUpdateChecker();
     }).catch(function (err) {
       $("address-list").innerHTML = '<li class="empty-msg">Could not load map data: ' + escapeHtml(err.message || String(err)) + "</li>";
       $("loading-overlay").classList.remove("show");
