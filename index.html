@@ -40,6 +40,15 @@
     --precinct-label-color: #0047AB;
     --precinct-unselected-outline: #1A1A1A;
 
+    /* The "current clickable overlay" outline (on the Overlays row) and its
+       "clickable" hint badge border -- was hardcoded black, which nearly
+       vanished when the OS/browser was in dark mode (now moot, since the app
+       always forces the light palette -- see the removed prefers-color-scheme
+       block above), and a bare "why is there a black box" wasn't very
+       legible even against white. Yellow reads clearly as a highlight/legend
+       color in both cases. */
+    --clickable-outline: #F2B705;
+
     /* A soft top-to-bottom wash behind the topbar row and each sidebar
        section's heading (see #topbar and .sidebar-header). This fallback
        (plain violet, matching DEFAULT_SETTINGS.colors.headerTint) only
@@ -72,21 +81,14 @@
     --tint-districts: rgba(171, 43, 96, 0.40);
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --paper: #0F1B23;
-      --panel: #16232C;
-      --ink: #E6EDF1;
-      --muted: #8FA3AE;
-      --border: #263640;
-      --line: #7C93A2;
-      --focus: #5FA8C9;
-      --select: #3D8BFF;
-      --accent: #F0793F;
-      --accent-ink: #171008;
-      --shadow: 0 12px 32px -12px rgba(0,0,0,0.55);
-    }
-  }
+  /* Dark mode is intentionally NOT wired to prefers-color-scheme: the app
+     always renders with the light/white palette above, regardless of the
+     visitor's OS or browser (e.g. Chrome's own Appearance: Device/Light/Dark
+     setting) dark-mode preference -- some outline/border colors elsewhere in
+     this file are hardcoded black and lose contrast against the dark panel
+     background, so an uncontrolled OS-driven dark mode made those outlines
+     hard to see. A manual override still exists for a future "Dark mode"
+     toggle in Settings, but nothing currently sets data-theme="dark". */
   :root[data-theme="dark"] {
     --paper: #0F1B23;
     --panel: #16232C;
@@ -534,7 +536,7 @@
     margin-bottom: 4px;
   }
   /* Overlays' own title row also carries a small "clickable" hint, right-
-     justified against the section title -- a legend for the black outline
+     justified against the section title -- a legend for the yellow outline
      (.layers-choice-row-current-clickable) that marks whichever Overlays
      row is the current clickable overlay, so it reads as "this outline
      means clickable" rather than an unexplained box. */
@@ -546,7 +548,7 @@
     text-transform: none;
     letter-spacing: normal;
     color: var(--ink);
-    border: 1.5px solid #000000;
+    border: 1.5px solid var(--clickable-outline);
     border-radius: 4px;
     padding: 1px 6px;
   }
@@ -598,7 +600,7 @@
      border-radius and never shifts layout (box-sizing is border-box, but an
      actual border would still nudge the row's negative-margin bleed against
      its rounded neighbors). Toggled in JS by updateLayersMenuClickableOutline(). */
-  .layers-choice-row-current-clickable { box-shadow: inset 0 0 0 2px #000000; }
+  .layers-choice-row-current-clickable { box-shadow: inset 0 0 0 2px var(--clickable-outline); }
 
   .layers-menu-header {
     display: flex;
@@ -2563,7 +2565,7 @@
     updateLayersMenuClickableOutline();
   }
 
-  // Puts the black "current clickable overlay" outline (see
+  // Puts the yellow "current clickable overlay" outline (see
   // .layers-choice-row-current-clickable) on whichever Overlays row matches
   // currentClickableOverlay, and off every other row. Despite the name (kept
   // for now to minimize churn -- this predates the Overlays section's move
