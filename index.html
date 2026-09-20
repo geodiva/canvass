@@ -41,13 +41,12 @@
     --precinct-unselected-outline: #1A1A1A;
 
     /* The "current clickable overlay" outline (on the Overlays row) and its
-       "clickable" hint badge border -- was hardcoded black, which nearly
-       vanished when the OS/browser was in dark mode (now moot, since the app
-       always forces the light palette -- see the removed prefers-color-scheme
-       block above), and a bare "why is there a black box" wasn't very
-       legible even against white. Yellow reads clearly as a highlight/legend
-       color in both cases. */
-    --clickable-outline: #F2B705;
+       "choose clickable overlay" hint badge border. Briefly changed to
+       yellow when the OS/browser's dark-mode setting made a hardcoded black
+       outline nearly vanish -- now moot, since the app always forces the
+       light palette (see the removed prefers-color-scheme block above), so
+       black reads clearly again and was brought back by request. */
+    --clickable-outline: #000000;
 
     /* A soft top-to-bottom wash behind the topbar row and each sidebar
        section's heading (see #topbar and .sidebar-header). This fallback
@@ -61,8 +60,8 @@
        matching row in the Layers menu's Overlays list) gets its own color
        instead of sharing --header-tint, so the two stay visually paired at a
        glance. The three hues are spaced evenly around the color wheel --
-       120 degrees apart, since there are three overlays (Voting Precincts /
-       Canvassed areas / City council districts); the rule scales down to
+       120 degrees apart, since there are three overlays (Voter precincts /
+       Canvassed addresses / City council districts); the rule scales down to
        180 degrees apart if there were ever only two -- rather than clustered
        together, so the three read as clearly different colors at a glance
        instead of three shades of the same hue. Drawn noticeably darker than
@@ -352,7 +351,7 @@
      (updateSidebarSectionBorders(), called by setOverlayOn()). */
   .sidebar-section.sidebar-section-last { border-bottom: none; }
   /* A little breathing room between the three search/list sections
-     (Voting precincts / Address / City council districts) -- previously
+     (Voter precincts / Canvassed addresses / City council districts) -- previously
      just the hairline border above separated them, with the next section's
      header sitting flush against it. Same ":not(.sidebar-section-last)"
      exclusion as the border-removal rule above, so the bottom-anchored
@@ -388,7 +387,7 @@
      own padding just below, the closest existing precedent for a
      checkbox/radio list sitting directly in a sidebar section. */
   .sidebar-overlays-choices { padding: 6px 14px 12px; }
-  /* Voting Precincts, Canvassed areas, and City council districts each get
+  /* Voter precincts, Canvassed addresses, and City council districts each get
      their own tint instead of the shared --header-tint above, so each
      overlay's sidebar section(s) read as visually paired with that overlay's
      own row in the Layers menu (see .layers-choice-row-precincts/-canvass/
@@ -535,11 +534,11 @@
     color: var(--muted);
     margin-bottom: 4px;
   }
-  /* Overlays' own title row also carries a small "clickable" hint, right-
-     justified against the section title -- a legend for the yellow outline
-     (.layers-choice-row-current-clickable) that marks whichever Overlays
-     row is the current clickable overlay, so it reads as "this outline
-     means clickable" rather than an unexplained box. */
+  /* Overlays' own title row also carries a small "choose clickable overlay"
+     hint, right-justified against the section title -- a legend for the
+     black outline (.layers-choice-row-current-clickable) that marks
+     whichever Overlays row is the current clickable overlay, so it reads as
+     "this outline means clickable" rather than an unexplained box. */
   .layers-section-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
   .layers-section-title-row .layers-section-title { margin-bottom: 0; }
   .layers-section-title-hint {
@@ -1191,7 +1190,7 @@
     <div class="sidebar-section" id="sidebar-overlays-section">
       <div class="sidebar-header layers-section-title-row">
         <h2>Overlays</h2>
-        <span class="layers-section-title-hint">clickable</span>
+        <span class="layers-section-title-hint">choose clickable overlay</span>
       </div>
       <div class="sidebar-overlays-choices" id="sidebar-overlays-choices"></div>
     </div>
@@ -1221,22 +1220,22 @@
     <div class="sidebar-list-stack">
       <div class="sidebar-section" id="precinct-list-section">
         <div class="sidebar-header">
-          <h2>Voting precincts</h2>
+          <h2>Voter precincts</h2>
           <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
         </div>
         <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
       </div>
       <div class="sidebar-section" id="address-list-section">
         <div class="sidebar-header">
-          <h2>Address</h2>
+          <h2>Canvassed addresses</h2>
           <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
         </div>
         <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
         <div class="sidebar-footer" id="count-footer">&nbsp;</div>
       </div>
-      <!-- Order here (Voting precincts / Address / City council districts)
+      <!-- Order here (Voter precincts / Canvassed addresses / City council districts)
            deliberately matches the Layers menu's own Overlays list order
-           (Voting Precincts / Canvassed areas / City council districts) --
+           (Voter precincts / Canvassed addresses / City council districts) --
            see .sidebar-list-stack above -- so the two stay in the same
            sequence at a glance. -->
       <div class="sidebar-section" id="district-list-section" hidden>
@@ -1458,7 +1457,7 @@
 
   // ---- overlays (layers menu) ----
   // Which optional map layers are showing right now, and (for the two that
-  // respond to a map click -- Canvassed areas never does) which one of
+  // respond to a map click -- Canvassed addresses never does) which one of
   // those actually gets to handle the next click. Each of these drives both
   // a map layer and a whole sidebar section together -- see setOverlayOn().
   var overlaysOn = { precincts: true, canvassProgress: true, districts: false };
@@ -1581,7 +1580,7 @@
   // saturation/lightness read as clearly distinct at a glance, unlike colors
   // that happen to be close together on the wheel. General rule this
   // follows: 180 degrees apart for 2 overlays, 120 degrees apart for 3
-  // (currently always 3: Voting Precincts, Canvassed areas, City council
+  // (currently always 3: Voter precincts, Canvassed addresses, City council
   // districts). The map's own district borders/glow are unrelated and keep
   // using DISTRICT_BORDER_HEX/DISTRICT_SELECTED_HEX -- this triad is purely
   // a sidebar/Layers-menu color-coding choice.
@@ -1957,7 +1956,7 @@
     // Establish the initial "Current clickable overlay" state (and prune the
     // sidebar's trailing borders) right away -- otherwise currentClickableOverlay
     // stays null until the user first touches an Overlays checkbox, and a
-    // click on the default-on Voting Precincts layer would silently do
+    // click on the default-on Voter precincts layer would silently do
     // nothing until then.
     updateClickableOverlayState();
     updateSidebarSectionBorders();
@@ -2134,7 +2133,7 @@
   function updateVisibleParcels() {
     if (!parcelsLayer || parcelsMinZoom === null) return;
 
-    // "Canvassed areas" overlay off -- no colored parcel areas at all,
+    // "Canvassed addresses" overlay off -- no colored parcel areas at all,
     // walked or not, regardless of zoom (see setOverlayOn()). Same
     // attach/detach mechanics as the below-threshold branch just below,
     // just with nothing kept on.
@@ -2309,8 +2308,8 @@
   // without opening that menu at all.
   function buildOverlaysChoices(container) {
     [
-      { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
-      { key: "canvassProgress", label: "Canvassed areas", tintClass: "layers-choice-row-canvass" },
+      { key: "precincts", label: "Voter precincts", tintClass: "layers-choice-row-precincts" },
+      { key: "canvassProgress", label: "Canvassed addresses", tintClass: "layers-choice-row-canvass" },
       { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
     ].forEach(function (ov) {
       // A plain <div> row rather than a <label> -- a <label> forwards a
@@ -2332,7 +2331,7 @@
       var labelText = L.DomUtil.create("span", "layers-choice-label-text", row);
       labelText.textContent = ov.label;
       // Only the two CLICKABLE_OVERLAYS entries have a "current
-      // clickable" concept to pick -- clicking "Canvassed areas"'s name
+      // clickable" concept to pick -- clicking "Canvassed addresses"'s name
       // has nothing to select, so it's left as a non-interactive label.
       if (CLICKABLE_OVERLAYS.indexOf(ov.key) !== -1) {
         L.DomEvent.on(labelText, "click", function () { setCurrentClickableOverlay(ov.key); });
@@ -2449,7 +2448,7 @@
 
   // ---- overlays ----
   // Which sidebar section(s) live and die with each overlay. Precinct
-  // canvassing progress is bundled in with the Voting Precincts overlay --
+  // canvassing progress is bundled in with the Voter precincts overlay --
   // at a glance they're the same "precinct" concept, and there's no
   // standalone toggle for the progress legend on its own.
   var OVERLAY_SECTIONS = {
@@ -2530,7 +2529,7 @@
     updateSidebarSectionBorders();
   }
 
-  var CLICKABLE_OVERLAY_LABEL = { precincts: "Voting Precincts", districts: "City council districts" };
+  var CLICKABLE_OVERLAY_LABEL = { precincts: "Voter precincts", districts: "City council districts" };
 
   // Keeps currentClickableOverlay correct -- null with none of
   // CLICKABLE_OVERLAYS on, that one overlay when exactly one is on, the
@@ -2565,7 +2564,7 @@
     updateLayersMenuClickableOutline();
   }
 
-  // Puts the yellow "current clickable overlay" outline (see
+  // Puts the black "current clickable overlay" outline (see
   // .layers-choice-row-current-clickable) on whichever Overlays row matches
   // currentClickableOverlay, and off every other row. Despite the name (kept
   // for now to minimize churn -- this predates the Overlays section's move
@@ -2630,7 +2629,7 @@
   // Each layer's own click handler already no-ops via isOverlayClickActive()
   // when it isn't the current one -- but Leaflet's Canvas renderer still
   // does its hit-testing purely by geometry and z-order, so with both
-  // Voting Precincts and City council districts on, whichever one happens
+  // Voter precincts and City council districts on, whichever one happens
   // to be drawn on top would otherwise silently *swallow* every click
   // there, even the ones meant for the overlay underneath (confirmed: city
   // council districts cover the whole city, so with them drawn above
@@ -2949,7 +2948,7 @@
     parcelsLayer = L.geoJSON(parcelsGeoJson, {
       style: parcelStyle,
       // Parcels are click-through: selecting/zooming to an address is only
-      // ever done from the Address list now, not by clicking its shape on
+      // ever done from the Canvassed addresses list now, not by clicking its shape on
       // the map. Marking the layer non-interactive also means a click on a
       // parcel falls straight through to whatever's underneath it (the
       // precinct it sits inside), instead of the parcel intercepting it.
@@ -3057,7 +3056,7 @@
         });
         precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [], labelMarker: labelMarker };
         layer.on("click", function (e) {
-          // Only when Voting Precincts is both on AND the current clickable
+          // Only when Voter precincts is both on AND the current clickable
           // overlay (see setOverlayOn()/isOverlayClickActive()) -- with City
           // council districts also on and set as current instead, a click
           // here should do nothing so it can fall through to whatever's
@@ -3079,7 +3078,7 @@
     // Precincts themselves are large, few in number, and meant to be visible
     // at every zoom level (unlike the individual parcels), so the shapes are
     // added directly rather than going through viewport-windowed visibility
-    // -- gated only by the Voting Precincts overlay checkbox (see
+    // -- gated only by the Voter precincts overlay checkbox (see
     // setOverlayOn()), not by zoom. Their number labels are handled
     // separately, gated on zoom (see above).
     if (overlaysOn.precincts) precinctsLayer.addTo(map);
@@ -3145,7 +3144,7 @@
     // delta (e.g. 14.999999999999998 instead of 15) landing a hair under
     // the threshold right when a zoom exactly matches it. Never show a
     // number label for a precinct shape that isn't even on the map right
-    // now (Voting Precincts overlay off -- see setOverlayOn()).
+    // now (Voter precincts overlay off -- see setOverlayOn()).
     var show = overlaysOn.precincts && map.getZoom() >= precinctLabelsMinZoom - 1e-9;
     Object.keys(precinctIndex).forEach(function (id) {
       var marker = precinctIndex[id].labelMarker;
@@ -3272,7 +3271,7 @@
   }
 
   // ================== PRECINCT LIST ==================
-  // filterText matches the same way the Address search does: a plain
+  // filterText matches the same way the Canvassed addresses search does: a plain
   // case-insensitive substring match against the precinct number, so typing
   // "312" finds 31200, 31201, etc.
   function buildPrecinctList(filterText) {
