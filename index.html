@@ -62,7 +62,7 @@
        instead of sharing --header-tint, so the two stay visually paired at a
        glance. The three hues are spaced evenly around the color wheel --
        120 degrees apart, since there are three overlays (Voting Precincts /
-       Canvass progress / City council districts); the rule scales down to
+       Canvassed areas / City council districts); the rule scales down to
        180 degrees apart if there were ever only two -- rather than clustered
        together, so the three read as clearly different colors at a glance
        instead of three shades of the same hue. Drawn noticeably darker than
@@ -388,7 +388,7 @@
      own padding just below, the closest existing precedent for a
      checkbox/radio list sitting directly in a sidebar section. */
   .sidebar-overlays-choices { padding: 6px 14px 12px; }
-  /* Voting Precincts, Canvass progress, and City council districts each get
+  /* Voting Precincts, Canvassed areas, and City council districts each get
      their own tint instead of the shared --header-tint above, so each
      overlay's sidebar section(s) read as visually paired with that overlay's
      own row in the Layers menu (see .layers-choice-row-precincts/-canvass/
@@ -1236,7 +1236,7 @@
       </div>
       <!-- Order here (Voting precincts / Address / City council districts)
            deliberately matches the Layers menu's own Overlays list order
-           (Voting Precincts / Canvass progress / City council districts) --
+           (Voting Precincts / Canvassed areas / City council districts) --
            see .sidebar-list-stack above -- so the two stay in the same
            sequence at a glance. -->
       <div class="sidebar-section" id="district-list-section" hidden>
@@ -1458,7 +1458,7 @@
 
   // ---- overlays (layers menu) ----
   // Which optional map layers are showing right now, and (for the two that
-  // respond to a map click -- Canvass progress never does) which one of
+  // respond to a map click -- Canvassed areas never does) which one of
   // those actually gets to handle the next click. Each of these drives both
   // a map layer and a whole sidebar section together -- see setOverlayOn().
   var overlaysOn = { precincts: true, canvassProgress: true, districts: false };
@@ -1581,7 +1581,7 @@
   // saturation/lightness read as clearly distinct at a glance, unlike colors
   // that happen to be close together on the wheel. General rule this
   // follows: 180 degrees apart for 2 overlays, 120 degrees apart for 3
-  // (currently always 3: Voting Precincts, Canvass progress, City council
+  // (currently always 3: Voting Precincts, Canvassed areas, City council
   // districts). The map's own district borders/glow are unrelated and keep
   // using DISTRICT_BORDER_HEX/DISTRICT_SELECTED_HEX -- this triad is purely
   // a sidebar/Layers-menu color-coding choice.
@@ -2134,7 +2134,7 @@
   function updateVisibleParcels() {
     if (!parcelsLayer || parcelsMinZoom === null) return;
 
-    // "Canvass progress" overlay off -- no colored parcel areas at all,
+    // "Canvassed areas" overlay off -- no colored parcel areas at all,
     // walked or not, regardless of zoom (see setOverlayOn()). Same
     // attach/detach mechanics as the below-threshold branch just below,
     // just with nothing kept on.
@@ -2310,7 +2310,7 @@
   function buildOverlaysChoices(container) {
     [
       { key: "precincts", label: "Voting Precincts", tintClass: "layers-choice-row-precincts" },
-      { key: "canvassProgress", label: "Canvass progress", tintClass: "layers-choice-row-canvass" },
+      { key: "canvassProgress", label: "Canvassed areas", tintClass: "layers-choice-row-canvass" },
       { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
     ].forEach(function (ov) {
       // A plain <div> row rather than a <label> -- a <label> forwards a
@@ -2332,7 +2332,7 @@
       var labelText = L.DomUtil.create("span", "layers-choice-label-text", row);
       labelText.textContent = ov.label;
       // Only the two CLICKABLE_OVERLAYS entries have a "current
-      // clickable" concept to pick -- clicking "Canvass progress"'s name
+      // clickable" concept to pick -- clicking "Canvassed areas"'s name
       // has nothing to select, so it's left as a non-interactive label.
       if (CLICKABLE_OVERLAYS.indexOf(ov.key) !== -1) {
         L.DomEvent.on(labelText, "click", function () { setCurrentClickableOverlay(ov.key); });
