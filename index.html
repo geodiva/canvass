@@ -611,7 +611,7 @@
      shape/spacing. */
   .legend-swatch-outline {
     background: transparent;
-    border: 2px solid #1D4ED8; /* matches DISTRICT_BORDER_HEX in the JS below */
+    border: 3px solid #1D4ED8; /* matches DISTRICT_BORDER_HEX in the JS below */
     box-sizing: border-box;
   }
 
@@ -639,8 +639,27 @@
     width: 230px;
     max-width: calc(100vw - 32px);
     overflow: hidden;
-    margin: 0 !important; /* Leaflet's own control-corner margin still applies around this */
+    /* A bit more room than Leaflet's own default ~10px control-corner gap --
+       10px off the map's right edge (matching that default explicitly) and
+       extra clearance below, so this doesn't sit flush against the
+       attribution ("Leaflet | (c) OpenStreetMap contributors") credit line
+       that's also anchored in this same corner. Once dragged (see
+       setupLegendDrag()), this margin is zeroed out in favor of an explicit
+       position:fixed left/top instead. */
+    margin: 0 10px 16px 0 !important;
   }
+  .map-legend-title-bar {
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .map-legend-title-bar.legend-dragging { cursor: grabbing; }
   .legend-section { display: flex; flex-direction: column; }
   .legend-section[hidden] { display: none; }
   /* A visible section that has an earlier visible sibling gets a divider --
@@ -2685,6 +2704,7 @@
         // structure the old sidebar section used, just relocated, so
         // there's no interactivity here to wire up as it's built.
         container.innerHTML =
+          '<div class="map-legend-title-bar" id="map-legend-title-bar">Map Legend</div>' +
           '<div class="legend-section" id="precinct-progress-section">' +
             '<div class="sidebar-header"><h2>Voter precincts</h2></div>' +
             '<div class="status-legend" id="precinct-legend">' +
@@ -2711,6 +2731,7 @@
         // used for these three sections' initial [hidden] state, kept in
         // sync by hand rather than computed here, since setOverlayOn() is
         // what takes over from this point on.
+        setupLegendDrag(container, container.querySelector("#map-legend-title-bar"));
         return container;
       }
     });
@@ -2729,6 +2750,68 @@
       return el && !el.hidden;
     });
     legend.style.display = anyVisible ? "" : "none";
+  }
+
+  // Makes the "Map Legend" title bar a drag handle for the whole legend
+  // control, the same way a precinct/district panel's own title (see
+  // setupFloatingPanelDrag()) or the Settings panel's header (see
+  // setupSettingsPanelDrag()) are draggable.
+  //
+  // Unlike those two, this control starts out laid out by Leaflet's own
+  // bottomright corner positioning (see addLegendControl()) rather than a
+  // plain position:absolute/fixed box from the start -- setting left/top on
+  // it would do nothing while Leaflet's own corner layout still governs its
+  // position. So the first pointerdown freezes its CURRENT on-screen spot
+  // (via getBoundingClientRect(), which is viewport-relative) as an explicit
+  // position:fixed box at that same spot -- no visual jump -- and every
+  // drag from then on is plain position:fixed math, the same as the
+  // Settings panel's own drag (viewport-relative throughout, so unlike the
+  // precinct/district panels this needs no #main-layout offset correction;
+  // see viewportToLayoutOffset()'s comment for why those two are
+  // different). The dragged position then persists for the rest of the
+  // session, same as leaving a window wherever you dragged it.
+  function setupLegendDrag(container, handle) {
+    var drag = null;
+    handle.addEventListener("pointerdown", function (e) {
+      var rect = container.getBoundingClientRect();
+      container.style.position = "fixed";
+      container.style.left = rect.left + "px";
+      container.style.top = rect.top + "px";
+      container.style.right = "auto";
+      container.style.bottom = "auto";
+      // The CSS margin that gives this control its default breathing room
+      // off the map's edge and the attribution credit line below it (see
+      // .map-legend) would otherwise still apply on top of an explicit
+      // left/top, shifting the dragged box away from the cursor by that same
+      // amount -- exactly the kind of drag-doesn't-track-the-cursor bug
+      // already fixed once for the precinct/district panels. setProperty's
+      // "important" is needed to actually beat that CSS rule's own
+      // !important (a plain container.style.margin assignment would lose to
+      // it silently).
+      container.style.setProperty("margin", "0", "important");
+      drag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
+      handle.classList.add("legend-dragging");
+      e.preventDefault();
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var rect = container.getBoundingClientRect();
+      var margin = 8;
+      var newLeft = drag.startLeft + (e.clientX - drag.startX);
+      var newTop = drag.startTop + (e.clientY - drag.startY);
+      newLeft = Math.max(margin, Math.min(newLeft, window.innerWidth - rect.width - margin));
+      newTop = Math.max(margin, Math.min(newTop, window.innerHeight - rect.height - margin));
+      container.style.left = newLeft + "px";
+      container.style.top = newTop + "px";
+      e.preventDefault();
+    });
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      handle.classList.remove("legend-dragging");
+    }
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
   }
 
   // Mirrors whichever basemap is actually showing into the layers menu's own
