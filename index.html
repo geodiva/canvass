@@ -369,8 +369,8 @@
        "10px from the edge" spot the old override gave, sliding smoothly
        between the two the rest of the time. */
     right: calc(90% + 10px);
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     padding: 0;
     border-radius: 50%;
     border: 1px solid var(--border);
@@ -380,7 +380,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.6rem;
+    font-size: 2rem;
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
@@ -1345,7 +1345,7 @@
        so collapsing shrinks its HEIGHT (to 0) instead of its width, and the
        toggle tab moves to the top-center of that now-horizontal boundary,
        rotated so its chevron still points the intuitive direction. */
-    .sidebar-toggle-btn { top: -18px; left: 50%; right: auto; margin-left: -18px; transform: rotate(90deg); }
+    .sidebar-toggle-btn { top: -20px; left: 50%; right: auto; margin-left: -20px; transform: rotate(90deg); }
     #main-layout.sidebar-collapsed aside.sidebar {
       width: 100%;
       flex: 0 0 0;
@@ -2752,6 +2752,40 @@
     legend.style.display = anyVisible ? "" : "none";
   }
 
+  // Turning on another overlay adds a whole new section to the legend (see
+  // updateLegendVisibility()'s sibling call in setOverlayOn()), which can
+  // grow it tall enough to run off the top or bottom of the screen --
+  // especially once it's already been dragged somewhere via
+  // setupLegendDrag(), where it's pinned by a fixed top rather than
+  // Leaflet's own self-adjusting bottomright corner layout. Called after
+  // every overlay toggle, this nudges it back fully into view whenever that
+  // happens, and is a no-op otherwise (turning an overlay back OFF only
+  // shrinks the box, which can't newly push it off-screen, so this never
+  // moves it just because a section closed).
+  function keepLegendOnScreen() {
+    var legend = document.querySelector(".map-legend");
+    if (!legend || legend.style.display === "none") return;
+    var margin = 8;
+    var rect = legend.getBoundingClientRect();
+    var newTop = rect.top;
+    if (rect.bottom > window.innerHeight - margin) newTop = window.innerHeight - margin - rect.height;
+    if (rect.top < margin) newTop = margin;
+    newTop = Math.max(margin, newTop);
+    if (Math.abs(newTop - rect.top) < 1) return; // already fully on screen
+    // Same "freeze the current on-screen spot, then move it" handoff
+    // setupLegendDrag() uses for its first pointerdown -- works whether the
+    // legend is still governed by Leaflet's own corner layout (never
+    // dragged yet) or already position:fixed from an earlier drag, since
+    // either way rect.left/rect.top above already reflect where it's
+    // actually sitting right now.
+    legend.style.position = "fixed";
+    legend.style.left = rect.left + "px";
+    legend.style.right = "auto";
+    legend.style.bottom = "auto";
+    legend.style.setProperty("margin", "0", "important");
+    legend.style.top = newTop + "px";
+  }
+
   // Makes the "Map Legend" title bar a drag handle for the whole legend
   // control, the same way a precinct/district panel's own title (see
   // setupFloatingPanelDrag()) or the Settings panel's header (see
@@ -2898,6 +2932,7 @@
       if (el) el.hidden = !on;
     });
     updateLegendVisibility();
+    keepLegendOnScreen();
 
     if (key === "districts" && on) {
       // buildDistrictList() at boot ran while this section was still
