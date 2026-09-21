@@ -291,21 +291,44 @@
 
   aside.sidebar {
     position: relative; /* containing block for .sidebar-toggle-btn below */
-    width: 340px;
+    width: 300px;
     flex-shrink: 0;
     background: var(--panel);
     border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
+    /* Not display:flex here anymore -- its only two children now are the
+       toggle button (absolutely positioned, outside normal flow) and
+       .sidebar-inner (below), which just fills whatever box this animates
+       to. The actual vertical stacking of sections lives on .sidebar-content
+       inside .sidebar-inner instead (see both below). */
     /* High enough to paint above the map's own content (Leaflet's internal
        panes run up to z-index 700 or so for tiles/shapes/popups) -- needed
        now that .sidebar-toggle-btn can visually sit over the map, whether
-       poking 14px into it while expanded or sitting in the freed-up space
+       poking 16px into it while expanded or sitting in the freed-up space
        while collapsed. Still below the app's own floating panels (precinct
        panel 900, settings panel 950, update toast 1500) so those correctly
        layer over it on the rare occasion they'd overlap. */
     z-index: 800;
     transition: width 0.2s ease, flex-basis 0.2s ease;
+  }
+  /* The sliding "viewport": tracks aside.sidebar's own (animating) width at
+     all times via width:100%, and clips .sidebar-content -- which stays a
+     fixed 300px wide regardless -- so collapsing/restoring reads as the
+     content actually sliding out of/into view together with the edge,
+     rather than the content just vanishing the instant the box starts to
+     shrink. Deliberately NOT the same element as aside.sidebar itself (see
+     the comment above the toggle button in the markup) so the toggle button
+     -- a sibling, not a child of this -- never gets clipped along with it. */
+  .sidebar-inner {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  .sidebar-inner[hidden] { display: none; }
+  .sidebar-content {
+    width: 300px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
 
   /* ---------- collapse/restore the whole sidebar ---------- */
@@ -345,11 +368,18 @@
     width: 0;
     min-width: 0;
     border-left: none;
-    overflow: visible; /* lets .sidebar-toggle-btn, positioned outside this
-                           now-zero-width box via its negative left offset,
-                           keep showing instead of being clipped */
+    /* aside.sidebar itself was never given overflow:hidden (see .sidebar-inner
+       above) so the toggle button, positioned outside this now-zero-width
+       box via its negative left offset, keeps showing instead of being
+       clipped -- this is just the default. */
   }
-  #main-layout.sidebar-collapsed aside.sidebar > *:not(.sidebar-toggle-btn) { display: none; }
+  /* .sidebar-inner's own [hidden] attribute (see setSidebarCollapsed()) is
+     what actually removes the content from layout/accessibility once the
+     collapse animation finishes -- not an instant display:none tied to this
+     class, which would skip the slide-closed animation entirely. While the
+     animation is running, .sidebar-inner's overflow:hidden + shrinking width
+     (tracking aside.sidebar's own) is what makes the content appear to slide
+     out of view. */
   /* Once collapsed, the sidebar's left edge (what the button normally hugs)
      sits flush against the browser's own right edge, which would push half
      the button off-screen -- move it fully on-screen instead. (top: stays
@@ -637,8 +667,11 @@
   /* The name text itself is a separate click target for the two
      CLICKABLE_OVERLAYS entries -- clicking it picks this overlay as the
      current clickable one (setCurrentClickableOverlay) instead of toggling
-     it on/off. */
-  .layers-choice-label-text { cursor: pointer; }
+     it on/off. flex: 1 1 auto stretches it to fill the rest of the row (past
+     the end of the text itself) so the empty space to the right of a short
+     name -- "Voter precincts" leaves a lot of it -- is just as clickable as
+     the text, rather than only a hairline target around the letters. */
+  .layers-choice-label-text { cursor: pointer; flex: 1 1 auto; }
   /* Same gradient wash (and the same three colors) as the matching sidebar
      section header(s) -- see the #precinct-list-section/#address-list-
      section/#district-list-section/.sidebar-header rules above -- so each
@@ -1288,6 +1321,15 @@
          "hide everything else while collapsed" rule below so it's the one
          thing that stays visible either way. -->
     <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" aria-label="Hide sidebar" title="Hide sidebar">&rsaquo;</button>
+    <!-- Clips .sidebar-content (below) as aside.sidebar's own width animates
+         open/closed, which is what makes the collapse/restore read as the
+         panel actually SLIDING rather than just popping in/out -- see
+         setSidebarCollapsed(). Kept as a separate element from aside.sidebar
+         itself (rather than putting overflow:hidden directly on the aside)
+         so the toggle button above, which deliberately pokes just outside
+         the sidebar's own edge, is never clipped along with it. -->
+    <div class="sidebar-inner" id="sidebar-inner">
+    <div class="sidebar-content">
     <!-- Moved here from the Layers menu (top-right map control) per explicit
          request, so it's visible without opening that menu at all -- see
          buildOverlaysChoices() in the script below, which is what actually
@@ -1350,6 +1392,8 @@
         </div>
         <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
       </div>
+    </div>
+    </div>
     </div>
   </aside>
   <div id="loading-overlay">
@@ -3861,7 +3905,11 @@
   }
 
   function repositionOpenPanel() {
-    if (openPrecinctId) positionPrecinctPanel(openPrecinctId);
+    // Don't fight an in-progress manual drag (see setupFloatingPanelDrag) --
+    // a moveend/zoomend firing mid-drag (e.g. the selection's own flyTo
+    // still settling) would otherwise snap the panel back to its computed
+    // spot out from under the cursor.
+    if (openPrecinctId && !$("precinct-panel").dataset.dragging) positionPrecinctPanel(openPrecinctId);
   }
 
   // Preferred: to the left of the precinct's on-screen shape. Secondary:
@@ -4029,7 +4077,9 @@
   }
 
   function repositionOpenDistrictPanel() {
-    if (openDistrictId) positionDistrictPanel(openDistrictId);
+    // See repositionOpenPanel()'s matching comment above -- same reasoning,
+    // just for the district panel's own drag.
+    if (openDistrictId && !$("district-panel").dataset.dragging) positionDistrictPanel(openDistrictId);
   }
 
   // Same settle-detection approach as zoomToFitPrecinct (see its own
@@ -4291,6 +4341,7 @@
   // #sidebar-toggle-btn in the markup) always stays visible right on the
   // sidebar's edge; only the sidebar's own content hides (see the
   // #main-layout.sidebar-collapsed CSS rules).
+  var sidebarInnerHideTimer = null; // pending "actually remove from layout" timeout, see below
   function setSidebarCollapsed(collapsed) {
     $("main-layout").classList.toggle("sidebar-collapsed", collapsed);
     var btn = $("sidebar-toggle-btn");
@@ -4302,6 +4353,28 @@
     var label = collapsed ? "Show sidebar" : "Hide sidebar";
     btn.setAttribute("aria-label", label);
     btn.title = label;
+
+    // .sidebar-inner's own shrinking width + overflow:hidden (see its CSS)
+    // is what makes the content visibly SLIDE out of view as aside.sidebar's
+    // width animates -- but once that's finished, the content should also
+    // come out of layout and the accessibility/tab order, the way it did
+    // before (display:none) rather than just sitting there at zero visible
+    // width. Toggling that (via the `hidden` attribute) is timed around the
+    // animation instead of instant, in both directions: collapsing waits
+    // for the slide to finish before pulling the content out, so there's
+    // something to see sliding away in the first place; expanding puts it
+    // back immediately, so there's something to see sliding back in.
+    var inner = $("sidebar-inner");
+    if (sidebarInnerHideTimer) { clearTimeout(sidebarInnerHideTimer); sidebarInnerHideTimer = null; }
+    if (collapsed) {
+      sidebarInnerHideTimer = setTimeout(function () {
+        inner.hidden = true;
+        sidebarInnerHideTimer = null;
+      }, 200);
+    } else {
+      inner.hidden = false;
+    }
+
     // The map's own box just started resizing (the sidebar's width/height is
     // animating via the CSS transition on aside.sidebar) -- Leaflet caches
     // its container size and has no way to notice this on its own, so
@@ -4382,12 +4455,23 @@
   // both panels already get repositioned by positionPanelNearBounds() every
   // time a new precinct/district is selected, so a drag never sticks around
   // past the next selection.
+  //
+  // That same auto-reposition is also wired to the map's own "moveend
+  // zoomend" events (see repositionOpenPanel/repositionOpenDistrictPanel),
+  // so the panel keeps following its shape if you pan/zoom while it's open
+  // -- but that used to fire during a drag too (e.g. a flyTo from the
+  // selection itself still settling, or the drag momentarily nudging the
+  // map underneath), snapping the panel back to its computed spot mid-drag
+  // and making it look like it "jumped" out from under the cursor. Marking
+  // the panel as dragging (via a data attribute those two functions check)
+  // suppresses that auto-reposition for as long as the drag is in progress.
   function setupFloatingPanelDrag(panel) {
     var handle = panel.querySelector("h3");
     var drag = null; // { startX, startY, startLeft, startTop } while dragging, else null
     handle.addEventListener("pointerdown", function (e) {
       var rect = panel.getBoundingClientRect();
       drag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
+      panel.dataset.dragging = "1";
       handle.classList.add("floating-panel-dragging");
       e.preventDefault();
     });
@@ -4404,7 +4488,9 @@
       e.preventDefault();
     });
     function endDrag() {
+      if (!drag) return;
       drag = null;
+      delete panel.dataset.dragging;
       handle.classList.remove("floating-panel-dragging");
     }
     window.addEventListener("pointerup", endDrag);
