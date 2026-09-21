@@ -290,14 +290,67 @@
   @keyframes a4m-spin { to { transform: rotate(360deg); } }
 
   aside.sidebar {
+    position: relative; /* containing block for .sidebar-toggle-btn below */
     width: 340px;
     flex-shrink: 0;
     background: var(--panel);
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    z-index: 10;
+    /* High enough to paint above the map's own content (Leaflet's internal
+       panes run up to z-index 700 or so for tiles/shapes/popups) -- needed
+       now that .sidebar-toggle-btn can visually sit over the map, whether
+       poking 14px into it while expanded or sitting in the freed-up space
+       while collapsed. Still below the app's own floating panels (precinct
+       panel 900, settings panel 950, update toast 1500) so those correctly
+       layer over it on the rare occasion they'd overlap. */
+    z-index: 800;
+    transition: width 0.2s ease, flex-basis 0.2s ease;
   }
+
+  /* ---------- collapse/restore the whole sidebar ---------- */
+  /* A small round tab sitting right on the sidebar's own edge, always
+     visible (see the exclusion below) regardless of whether the sidebar is
+     open or collapsed -- same "always-there toggle" idea as the Layers
+     menu's own collapse/reopen control, just adapted to a full-height panel
+     instead of a small floating one. */
+  .sidebar-toggle-btn {
+    position: absolute;
+    top: 12px;
+    left: -14px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 20;
+  }
+  .sidebar-toggle-btn:hover { color: var(--ink); }
+  #main-layout.sidebar-collapsed aside.sidebar {
+    width: 0;
+    min-width: 0;
+    border-left: none;
+    overflow: visible; /* lets .sidebar-toggle-btn, positioned outside this
+                           now-zero-width box via its negative left offset,
+                           keep showing instead of being clipped */
+  }
+  #main-layout.sidebar-collapsed aside.sidebar > *:not(.sidebar-toggle-btn) { display: none; }
+  /* Once collapsed, the sidebar's left edge (what the button normally hugs)
+     sits flush against the browser's own right edge, which would push half
+     the button off-screen -- and that same top-right corner is also where
+     the Layers menu control (collapsed to its icon) ends up once the map
+     expands to fill the freed space. Move the button fully on-screen and
+     clear of that control instead of trying to share the corner with it. */
+  #main-layout.sidebar-collapsed .sidebar-toggle-btn { left: auto; right: 10px; top: 110px; }
 
   /* "Current clickable overlay" and "Precinct Status" stay pinned at the
      top in normal document order, each sized to its own content. Everything
@@ -952,7 +1005,15 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 10px;
+    /* Draggable -- see setupSettingsPanelDrag(). Doesn't reposition the
+       close button itself, which keeps its own default cursor via the
+       higher-specificity #settings-close rule below. */
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
+  .settings-panel-header.settings-panel-dragging { cursor: grabbing; }
   .settings-panel-header h3 { margin: 0; font-size: 0.95rem; }
   #settings-close {
     border: none;
@@ -963,6 +1024,7 @@
     cursor: pointer;
     padding: 2px 4px;
   }
+  .settings-panel-header h3 { cursor: inherit; }
   #settings-close:hover { color: var(--ink); }
   .settings-section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
   .settings-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
@@ -1131,6 +1193,23 @@
     main.layout { flex-direction: column; }
     aside.sidebar { width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
     #map { flex: 0 0 auto; height: 50vh; }
+    /* Stacked layout: the sidebar sits below the map instead of beside it,
+       so collapsing shrinks its HEIGHT (to 0) instead of its width, and the
+       toggle tab moves to the top-center of that now-horizontal boundary,
+       rotated so its chevron still points the intuitive direction. */
+    .sidebar-toggle-btn { top: -14px; left: 50%; margin-left: -14px; transform: rotate(90deg); }
+    #main-layout.sidebar-collapsed aside.sidebar {
+      width: 100%;
+      flex: 0 0 0;
+      min-height: 0;
+      border-top: none;
+    }
+    #main-layout.sidebar-collapsed #map { flex: 1 1 auto; height: auto; }
+    /* Once collapsed, the sidebar's top edge (what the button normally
+       hugs) sits flush against the bottom of the browser window, which
+       would push half the button off-screen -- move it fully on-screen,
+       just above that edge, instead. */
+    #main-layout.sidebar-collapsed .sidebar-toggle-btn { top: auto; bottom: 10px; }
   }
 
   /* Phone, landscape: keep the side-by-side layout (map left, panel right)
@@ -1182,7 +1261,15 @@
 <main class="layout" id="main-layout">
   <div id="map"></div>
   <div id="zoom-level-indicator" hidden></div>
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
+    <!-- Collapses/restores the whole sidebar (see setSidebarCollapsed()) --
+         kept as the sidebar's own first child (rather than a separate
+         floating control) so it always sits right at the sidebar's edge,
+         whether that edge is at the sidebar's normal width or -- once
+         collapsed -- right up against the map. Explicitly excluded from the
+         "hide everything else while collapsed" rule below so it's the one
+         thing that stays visible either way. -->
+    <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" aria-label="Hide sidebar" title="Hide sidebar">&lsaquo;</button>
     <!-- Moved here from the Layers menu (top-right map control) per explicit
          request, so it's visible without opening that menu at all -- see
          buildOverlaysChoices() in the script below, which is what actually
@@ -1983,6 +2070,8 @@
     map.on("zoom zoomend", updateZoomLevelIndicator);
     applyShowZoomLevel();
     setupSwipeToWalk();
+    setupSettingsPanelDrag();
+    setupSidebarToggle();
 
     Promise.all([
       fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
@@ -4175,6 +4264,91 @@
     window.addEventListener("pointercancel", function () { swiping = false; });
   }
 
+  // ================== COLLAPSE/RESTORE THE SIDEBAR ==================
+  // Lets you free up the whole sidebar's width (or, stacked on a phone in
+  // portrait, its height) for the map -- e.g. while walking a precinct and
+  // wanting to see as much of it as possible. The toggle tab itself (see
+  // #sidebar-toggle-btn in the markup) always stays visible right on the
+  // sidebar's edge; only the sidebar's own content hides (see the
+  // #main-layout.sidebar-collapsed CSS rules).
+  function setSidebarCollapsed(collapsed) {
+    $("main-layout").classList.toggle("sidebar-collapsed", collapsed);
+    var btn = $("sidebar-toggle-btn");
+    btn.innerHTML = collapsed ? "&rsaquo;" : "&lsaquo;";
+    var label = collapsed ? "Show sidebar" : "Hide sidebar";
+    btn.setAttribute("aria-label", label);
+    btn.title = label;
+    // The map's own box just started resizing (the sidebar's width/height is
+    // animating via the CSS transition on aside.sidebar) -- Leaflet caches
+    // its container size and has no way to notice this on its own, so
+    // without a nudge tiles/controls would sit misaligned until the next
+    // pan or zoom. Matches the transition's own duration (see aside.sidebar
+    // above) so it fires once the resize has actually finished.
+    setTimeout(function () { map.invalidateSize(); }, 220);
+  }
+
+  function setupSidebarToggle() {
+    $("sidebar-toggle-btn").addEventListener("click", function () {
+      setSidebarCollapsed(!$("main-layout").classList.contains("sidebar-collapsed"));
+    });
+  }
+
+  // ================== DRAG THE SETTINGS PANEL ==================
+  // Grabbing the panel's header (title + close button row) lets you move the
+  // whole panel anywhere on screen -- handy since it can otherwise sit over
+  // whatever part of the map you're trying to look at while adjusting
+  // colors. Explicit request: the dragged position is NOT remembered --
+  // closing the panel (or reloading) always snaps it back to its default
+  // spot under the gear icon, since .settings-panel's own top/right CSS
+  // values only apply when there's no inline style overriding them (see
+  // resetSettingsPanelPosition(), called from openSettingsPanel()).
+  var settingsDrag = null; // { startX, startY, startLeft, startTop } while dragging, else null
+  function setupSettingsPanelDrag() {
+    var header = document.querySelector("#settings-panel .settings-panel-header");
+    var panel = $("settings-panel");
+    header.addEventListener("pointerdown", function (e) {
+      // Don't start a drag from the close button itself -- let its own
+      // click handler fire normally.
+      if (e.target.closest("#settings-close")) return;
+      var rect = panel.getBoundingClientRect();
+      settingsDrag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
+      header.classList.add("settings-panel-dragging");
+      e.preventDefault();
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!settingsDrag) return;
+      var rect = panel.getBoundingClientRect();
+      // Switching to explicit left/top (from the default top/right CSS)
+      // the first time a drag actually moves the panel; margins keep it
+      // from being dragged fully off-screen where it'd be unreachable.
+      var margin = 8;
+      var newLeft = settingsDrag.startLeft + (e.clientX - settingsDrag.startX);
+      var newTop = settingsDrag.startTop + (e.clientY - settingsDrag.startY);
+      newLeft = Math.max(margin, Math.min(newLeft, window.innerWidth - rect.width - margin));
+      newTop = Math.max(margin, Math.min(newTop, window.innerHeight - rect.height - margin));
+      panel.style.left = newLeft + "px";
+      panel.style.top = newTop + "px";
+      panel.style.right = "auto";
+      e.preventDefault();
+    });
+    function endDrag() {
+      settingsDrag = null;
+      header.classList.remove("settings-panel-dragging");
+    }
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+  }
+
+  // Clears any inline left/top/right left over from a previous drag, so the
+  // panel reopens at its normal default position (see setupSettingsPanelDrag()
+  // above) rather than wherever it was last dragged to.
+  function resetSettingsPanelPosition() {
+    var panel = $("settings-panel");
+    panel.style.left = "";
+    panel.style.top = "";
+    panel.style.right = "";
+  }
+
   function paintAtPoint(clientX, clientY) {
     var p = precinctIndex[openPrecinctId];
     if (!p) return;
@@ -4245,6 +4419,7 @@
     // for a viewer (see enterApp()), but never let the panel itself open
     // for one regardless of how this got called.
     if (!isEditor()) return;
+    resetSettingsPanelPosition();
     draftSettings = cloneSettings(currentSettings);
     populateSettingsForm(draftSettings);
     // Not part of draftSettings (see the SHOW_ZOOM_LEVEL_KEY comment above)
