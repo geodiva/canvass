@@ -316,10 +316,15 @@
      instead of a small floating one. */
   .sidebar-toggle-btn {
     position: absolute;
-    top: 12px;
-    left: -14px;
-    width: 28px;
-    height: 28px;
+    /* Same top offset whether the sidebar is open or collapsed (see the
+       collapsed-state override below, which no longer needs its own top:
+       value) -- and well clear of the Layers menu control's icon, which
+       sits in this same top-right corner once the map expands into the
+       sidebar's freed-up space while collapsed. */
+    top: 110px;
+    left: -16px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     border-radius: 50%;
     border: 1px solid var(--border);
@@ -329,7 +334,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.9rem;
+    font-size: 1.35rem;
+    font-weight: 600;
     line-height: 1;
     cursor: pointer;
     z-index: 20;
@@ -346,11 +352,10 @@
   #main-layout.sidebar-collapsed aside.sidebar > *:not(.sidebar-toggle-btn) { display: none; }
   /* Once collapsed, the sidebar's left edge (what the button normally hugs)
      sits flush against the browser's own right edge, which would push half
-     the button off-screen -- and that same top-right corner is also where
-     the Layers menu control (collapsed to its icon) ends up once the map
-     expands to fill the freed space. Move the button fully on-screen and
-     clear of that control instead of trying to share the corner with it. */
-  #main-layout.sidebar-collapsed .sidebar-toggle-btn { left: auto; right: 10px; top: 110px; }
+     the button off-screen -- move it fully on-screen instead. (top: stays
+     the same as the expanded state, set once above, so the tab doesn't jump
+     vertically when toggled.) */
+  #main-layout.sidebar-collapsed .sidebar-toggle-btn { left: auto; right: 10px; }
 
   /* "Current clickable overlay" and "Precinct Status" stay pinned at the
      top in normal document order, each sized to its own content. Everything
@@ -846,7 +851,20 @@
     z-index: 900;
   }
   .precinct-panel[hidden] { display: none; }
-  .precinct-panel h3 { margin: 0 0 2px; font-size: 0.98rem; }
+  /* The title doubles as a drag handle (see setupFloatingPanelDrag()) --
+     shared by both the precinct panel and the district panel, since they're
+     both built from this one .precinct-panel class. There's no separate
+     header row here the way the settings panel has one, so the title text
+     itself is the grabbable area. */
+  .precinct-panel h3 {
+    margin: 0 0 2px;
+    font-size: 0.98rem;
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .precinct-panel h3.floating-panel-dragging { cursor: grabbing; }
   .precinct-panel .field-label {
     display: block;
     font-size: 0.72rem;
@@ -1197,7 +1215,7 @@
        so collapsing shrinks its HEIGHT (to 0) instead of its width, and the
        toggle tab moves to the top-center of that now-horizontal boundary,
        rotated so its chevron still points the intuitive direction. */
-    .sidebar-toggle-btn { top: -14px; left: 50%; margin-left: -14px; transform: rotate(90deg); }
+    .sidebar-toggle-btn { top: -16px; left: 50%; margin-left: -16px; transform: rotate(90deg); }
     #main-layout.sidebar-collapsed aside.sidebar {
       width: 100%;
       flex: 0 0 0;
@@ -1269,7 +1287,7 @@
          collapsed -- right up against the map. Explicitly excluded from the
          "hide everything else while collapsed" rule below so it's the one
          thing that stays visible either way. -->
-    <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" aria-label="Hide sidebar" title="Hide sidebar">&lsaquo;</button>
+    <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" aria-label="Hide sidebar" title="Hide sidebar">&rsaquo;</button>
     <!-- Moved here from the Layers menu (top-right map control) per explicit
          request, so it's visible without opening that menu at all -- see
          buildOverlaysChoices() in the script below, which is what actually
@@ -2071,6 +2089,8 @@
     applyShowZoomLevel();
     setupSwipeToWalk();
     setupSettingsPanelDrag();
+    setupFloatingPanelDrag($("precinct-panel"));
+    setupFloatingPanelDrag($("district-panel"));
     setupSidebarToggle();
 
     Promise.all([
@@ -4274,7 +4294,11 @@
   function setSidebarCollapsed(collapsed) {
     $("main-layout").classList.toggle("sidebar-collapsed", collapsed);
     var btn = $("sidebar-toggle-btn");
-    btn.innerHTML = collapsed ? "&rsaquo;" : "&lsaquo;";
+    // Open -> arrow points right (toward the sidebar, "there's more this way"
+    // isn't quite it -- think of it as "tap to slide the panel that way").
+    // Collapsed -> arrow points left, back toward where the sidebar will
+    // reappear from. (Reversed from an earlier version of this control.)
+    btn.innerHTML = collapsed ? "&lsaquo;" : "&rsaquo;";
     var label = collapsed ? "Show sidebar" : "Hide sidebar";
     btn.setAttribute("aria-label", label);
     btn.title = label;
@@ -4347,6 +4371,44 @@
     panel.style.left = "";
     panel.style.top = "";
     panel.style.right = "";
+  }
+
+  // ================== DRAG THE PRECINCT / DISTRICT PANELS ==================
+  // Same idea as the settings panel drag above, generalized since both the
+  // precinct panel and the district panel are built from the shared
+  // .precinct-panel class. Grabbing the title lets you slide either panel
+  // out from under whatever part of the map it's covering. Unlike the
+  // settings panel, there's no separate "reset position" step needed here --
+  // both panels already get repositioned by positionPanelNearBounds() every
+  // time a new precinct/district is selected, so a drag never sticks around
+  // past the next selection.
+  function setupFloatingPanelDrag(panel) {
+    var handle = panel.querySelector("h3");
+    var drag = null; // { startX, startY, startLeft, startTop } while dragging, else null
+    handle.addEventListener("pointerdown", function (e) {
+      var rect = panel.getBoundingClientRect();
+      drag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
+      handle.classList.add("floating-panel-dragging");
+      e.preventDefault();
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var rect = panel.getBoundingClientRect();
+      var margin = 8;
+      var newLeft = drag.startLeft + (e.clientX - drag.startX);
+      var newTop = drag.startTop + (e.clientY - drag.startY);
+      newLeft = Math.max(margin, Math.min(newLeft, window.innerWidth - rect.width - margin));
+      newTop = Math.max(margin, Math.min(newTop, window.innerHeight - rect.height - margin));
+      panel.style.left = newLeft + "px";
+      panel.style.top = newTop + "px";
+      e.preventDefault();
+    });
+    function endDrag() {
+      drag = null;
+      handle.classList.remove("floating-panel-dragging");
+    }
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
   }
 
   function paintAtPoint(clientX, clientY) {
