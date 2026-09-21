@@ -380,13 +380,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 2rem;
-    font-weight: 600;
-    line-height: 1;
     cursor: pointer;
     z-index: 20;
   }
   .sidebar-toggle-btn:hover { color: var(--ink); }
+  /* An inline SVG chevron (see setSidebarCollapsed()) rather than a
+     "<"/">"-style text character -- a couple of fonts render those
+     particular glyphs noticeably below-center in their own line box, which
+     showed up as the chevron visibly sitting low in this circle no matter
+     how the flexbox centering above was tuned. An SVG has no font-metric
+     baseline/descender space to fight with, so centering it is just
+     centering a box. display:block clears the small baseline gap a plain
+     inline SVG would otherwise pick up, same reason as a plain inline
+     <img>. */
+  .sidebar-toggle-btn svg { display: block; }
   #main-layout.sidebar-collapsed aside.sidebar {
     width: 0;
     min-width: 0;
@@ -1417,7 +1424,7 @@
          collapsed -- right up against the map. Explicitly excluded from the
          "hide everything else while collapsed" rule below so it's the one
          thing that stays visible either way. -->
-    <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" aria-label="Hide sidebar" title="Hide sidebar">&rsaquo;</button>
+    <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" aria-label="Hide sidebar" title="Hide sidebar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 4 17 12 9 20"></polyline></svg></button>
     <!-- Clips .sidebar-content (below) as aside.sidebar's own width animates
          open/closed, which is what makes the collapse/restore read as the
          panel actually SLIDING rather than just popping in/out -- see
@@ -4638,6 +4645,16 @@
   // #sidebar-toggle-btn in the markup) always stays visible right on the
   // sidebar's edge; only the sidebar's own content hides (see the
   // #main-layout.sidebar-collapsed CSS rules).
+  // Plain SVG chevrons rather than "<"/">"-style text characters -- see the
+  // .sidebar-toggle-btn svg CSS comment for why. SIDEBAR_CHEVRON_RIGHT_SVG
+  // matches the static markup on the button in the HTML above exactly
+  // (the default, not-yet-collapsed state), so there's no flash/mismatch
+  // before this ever runs for the first time.
+  var SIDEBAR_CHEVRON_RIGHT_SVG =
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 4 17 12 9 20"></polyline></svg>';
+  var SIDEBAR_CHEVRON_LEFT_SVG =
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 4 7 12 15 20"></polyline></svg>';
+
   var sidebarSettleCleanup = null; // clears a previous toggle's still-pending listener/fallback, see below
   function setSidebarCollapsed(collapsed) {
     $("main-layout").classList.toggle("sidebar-collapsed", collapsed);
@@ -4646,7 +4663,7 @@
     // isn't quite it -- think of it as "tap to slide the panel that way").
     // Collapsed -> arrow points left, back toward where the sidebar will
     // reappear from. (Reversed from an earlier version of this control.)
-    btn.innerHTML = collapsed ? "&lsaquo;" : "&rsaquo;";
+    btn.innerHTML = collapsed ? SIDEBAR_CHEVRON_LEFT_SVG : SIDEBAR_CHEVRON_RIGHT_SVG;
     var label = collapsed ? "Show sidebar" : "Hide sidebar";
     btn.setAttribute("aria-label", label);
     btn.title = label;
