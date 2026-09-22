@@ -147,6 +147,19 @@
     color: var(--muted);
   }
   #user-chip strong { color: var(--ink); }
+  /* Who else is currently logged in (see renderOnlineUsers()) -- sits just
+     to the left of "Logged in as", and is hidden entirely rather than
+     showing an empty/"nobody" state when no one else is online right now.
+     Capped and truncated with an ellipsis (full list still available via
+     the title tooltip) so a bigger canvassing team can't stretch the
+     topbar arbitrarily wide. */
+  #online-users-chip {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+  }
+  #online-users-chip[hidden] { display: none; }
   #logout-btn {
     border: 1px solid var(--border);
     background: transparent;
@@ -1401,6 +1414,7 @@
 <div id="topbar">
   <div class="brand"><span class="dot"></span>Ami 4 Mayor Canvass Progress Map</div>
   <div id="user-chip">
+    <span id="online-users-chip" hidden></span>
     <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
     <button id="settings-toggle-btn" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
     <button id="logout-btn" type="button">Log out</button>
@@ -2043,6 +2057,33 @@
     }
   }
 
+  // ================== WHO ELSE IS ONLINE ==================
+  // The backend piggybacks presence on the same "all"/"since" polls this
+  // page already makes every SYNC_POLL_MS (see apiGet("all", ...) at boot
+  // and pollForUpdates() below, both of which now send `username` alongside
+  // their other params) -- recordHeartbeatAndGetOnline() in Code.gs records
+  // this user as just-seen and returns everyone seen recently enough to
+  // still count as online. No separate heartbeat request needed, and (since
+  // it's disabled together with the rest of the sync poll -- see DEMO_MODE
+  // checks) this never shows anything in demo mode, where there's no real
+  // shared backend for "who else" to mean anything.
+  var ONLINE_USERS_DISPLAY_CAP = 5; // keeps a big canvassing team from stretching the topbar arbitrarily wide
+  function renderOnlineUsers(online) {
+    var el = $("online-users-chip");
+    if (!el) return;
+    var others = (online || []).filter(function (u) {
+      return u && u.username && (!currentUser || u.username.toLowerCase() !== currentUser.username.toLowerCase());
+    });
+    if (!others.length) { el.hidden = true; return; }
+    var names = others.map(function (u) { return u.displayName || u.username; });
+    var shown = names.slice(0, ONLINE_USERS_DISPLAY_CAP);
+    var label = "Also online: " + shown.join(", ");
+    if (names.length > ONLINE_USERS_DISPLAY_CAP) label += ", +" + (names.length - ONLINE_USERS_DISPLAY_CAP) + " more";
+    el.textContent = label;
+    el.title = names.join(", "); // the full, untruncated list, in case the display got capped or ellipsized
+    el.hidden = false;
+  }
+
   function checkExistingSession() {
     try {
       var saved = sessionStorage.getItem("a4m_user");
@@ -2238,7 +2279,7 @@
       fetch(CONFIG.COUNCIL_DISTRICTS_URL).then(function (r) { return r.json(); }),
       DEMO_MODE
         ? Promise.resolve({ ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() })
-        : apiGet("all", {}).catch(function () { return { ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() }; })
+        : apiGet("all", { username: currentUser.username }).catch(function () { return { ok: true, precincts: [], parcels: [], serverTime: new Date().toISOString() }; })
     ]).then(function (results) {
       var boundaryGeoJson = results[0];
       var parcelsGeoJson = results[1];
@@ -2257,6 +2298,7 @@
           currentSettings = mergeSettings(DEFAULT_SETTINGS, stateRes.settings);
           settingsUpdatedAt = stateRes.settingsUpdatedAt || null;
         }
+        renderOnlineUsers(stateRes.online);
       }
       lastSyncAt = (stateRes && stateRes.serverTime) || new Date().toISOString();
       // Re-apply now that a saved shared default (if any) is merged in --
@@ -2328,8 +2370,9 @@
   // patches them in -- keeps everyone's map/lists/legend in sync with what
   // other canvassers are recording, without re-fetching the whole dataset.
   function pollForUpdates() {
-    apiGet("since", { since: lastSyncAt }).then(function (res) {
+    apiGet("since", { since: lastSyncAt, username: currentUser.username }).then(function (res) {
       if (!res || !res.ok) return;
+      renderOnlineUsers(res.online);
       var anySkipped = false;
       var touchedAny = false;
 
