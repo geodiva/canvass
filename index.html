@@ -86,6 +86,12 @@
        reshuffling all four to a perfectly even 90-degrees-apart split (which
        would mean recoloring the three existing, already-familiar tints too). */
     --tint-houseparties: rgba(171, 118, 43, 0.40);
+    /* A fifth overlay tint (Yard signs) -- a green hue that fills the other
+       remaining ~60-degrees-from-both-neighbors gap in the original triad
+       (between canvass at 95 deg and precincts at 215 deg), for the same
+       reason houseparties took the gap on the other side rather than
+       reshuffling every tint to an even 72-degrees-apart split. */
+    --tint-yardsigns: rgba(43, 171, 118, 0.40);
 
     /* The actual house-party map pin/legend icon color -- unrelated to the
        sidebar-row tint above (same as, say, --walked-color being unrelated to
@@ -93,6 +99,12 @@
        existing precinct-status reds/yellows/greens/purples, the district
        outline blue, or the walked-parcel near-black. */
     --houseparty-color: #D6336C;
+
+    /* Yard-sign pin colors -- two distinct colors for the two statuses
+       ("Placed" / "Wanted"), each also distinct from every other pin/marker
+       color already in use (houseparty pink, district blue, etc). */
+    --yardsign-placed-color: #2B8A3E;
+    --yardsign-wanted-color: #F08C00;
   }
 
   /* Dark mode is intentionally NOT wired to prefers-color-scheme: the app
@@ -557,6 +569,9 @@
   #legend-houseparty-section .sidebar-header {
     background: linear-gradient(180deg, var(--tint-houseparties), transparent 85%);
   }
+  #legend-yardsign-section .sidebar-header {
+    background: linear-gradient(180deg, var(--tint-yardsigns), transparent 85%);
+  }
 
   .sidebar-search-input {
     width: 100%;
@@ -659,6 +674,11 @@
      instead of .legend-swatch's fixed square. */
   .legend-icon-houseparty { width: 13px; height: 17px; flex-shrink: 0; display: flex; align-items: center; }
   .legend-icon-houseparty svg { display: block; width: 100%; height: 100%; }
+  /* Yard signs reuse the same pin-glyph legend treatment as House parties
+     (see .legend-icon-houseparty above) -- one row per status (Placed/
+     Wanted), each with its own colored pin via YARD_SIGN_ICON_SVG(color). */
+  .legend-icon-yardsign { width: 13px; height: 17px; flex-shrink: 0; display: flex; align-items: center; }
+  .legend-icon-yardsign svg { display: block; width: 100%; height: 100%; }
 
   /* ---------- map legend (bottom-right map control) ---------- */
   /* One .legend-section per overlay that's currently on -- built by
@@ -823,6 +843,7 @@
   .layers-choice-row-canvass { background: linear-gradient(180deg, var(--tint-canvass), transparent 85%); }
   .layers-choice-row-districts { background: linear-gradient(180deg, var(--tint-districts), transparent 85%); }
   .layers-choice-row-houseparties { background: linear-gradient(180deg, var(--tint-houseparties), transparent 85%); }
+  .layers-choice-row-yardsigns { background: linear-gradient(180deg, var(--tint-yardsigns), transparent 85%); }
 
   /* Marks whichever Overlays row (precincts or districts -- canvassProgress
      is never clickable, see CLICKABLE_OVERLAYS) is the current clickable
@@ -1158,6 +1179,19 @@
 
   /* ---------- house party map marker ---------- */
   .houseparty-marker svg { display: block; }
+
+  #yardsign-meta { margin-top: 4px; }
+  .yardsign-meta-row {
+    padding: 7px 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .yardsign-meta-row:first-child { border-top: none; }
+  .yardsign-meta-row .field-label { margin-bottom: 2px; }
+  .yardsign-meta-row .yardsign-meta-value { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+
+  /* ---------- yard sign map marker ---------- */
+  .yardsign-marker svg { display: block; }
 
   .dialog-actions {
     display: flex;
@@ -1613,6 +1647,15 @@
     </div>
   </div>
 
+  <!-- ============ YARD SIGN PANEL (floating, read-only info from the separate Yard Signs sheet) ============ -->
+  <div class="precinct-panel" id="yardsign-panel" hidden>
+    <h3 id="yardsign-panel-title">Yard Sign</h3>
+    <div id="yardsign-meta"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="yardsign-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+
   <!-- ============ SETTINGS PANEL (hideable; colors + default basemap) ============ -->
   <div class="settings-panel" id="settings-panel" hidden>
     <div class="settings-panel-header">
@@ -1703,6 +1746,12 @@
     // as "PASTE_YOUR..." (or blank) to leave that overlay off entirely; see
     // HOUSE_PARTIES_ENABLED below.
     HOUSE_PARTIES_URL: "https://script.google.com/macros/s/AKfycbzDB6dppHvGJFcLwv40uI7cteh6DLhvkAHnqMvLeFa6H2cBSj-X7xl-UpT_tFWuHKMg/exec",
+    // Optional, and completely separate from both URLs above -- its own
+    // Google Sheet and its own Apps Script deployment (see
+    // apps-script/YardSigns.gs), for the Yard signs overlay. Leave this
+    // as "PASTE_YOUR..." (or blank) to leave that overlay off entirely; see
+    // YARD_SIGNS_ENABLED below.
+    YARD_SIGNS_URL: "https://script.google.com/macros/s/AKfycbwO-9EzmXbJ6GtNFK9ZnqTEoi4Cwhra9E13S8RSUC_gXTNhnqlWlXJ59WluBzmdgIzb/exec",
     CITY_BOUNDARY_URL: "data/city_boundary.geojson",
     PARCELS_URL: "data/parcels.geojson",
     PRECINCTS_URL: "data/precincts.geojson",
@@ -1738,7 +1787,17 @@
   // a new house party added to the Sheet doesn't need to appear within
   // seconds, and geocoding cache lookups aside, this is a full re-fetch of
   // the sheet each time rather than a since-last-check delta.
-  var HOUSE_PARTIES_POLL_MS = 60000;
+  // window.__TEST_HP_POLL_MS lets the automated test suite shrink this to a
+  // couple of seconds so a poll-driven update doesn't take a full minute to
+  // show up in a test; unset in production, so real visitors always get the
+  // 60-second interval above.
+  var HOUSE_PARTIES_POLL_MS = window.__TEST_HP_POLL_MS || 60000;
+  // Same independence/reasoning as HOUSE_PARTIES_ENABLED above, but for the
+  // separate Yard Signs Sheet/Apps Script (see CONFIG.YARD_SIGNS_URL and
+  // apps-script/YardSigns.gs) -- on, off, and polled entirely independently
+  // of both the main backend and the House Parties overlay.
+  var YARD_SIGNS_ENABLED = !!CONFIG.YARD_SIGNS_URL && CONFIG.YARD_SIGNS_URL.indexOf("PASTE_YOUR") !== 0;
+  var YARD_SIGNS_POLL_MS = window.__TEST_YS_POLL_MS || 60000;
   var demoUsers = {};     // username(lowercased) -> {password, displayName}                 (demo mode only)
   // Demo-mode-only role assignments (no real Users sheet to read from here).
   // Against the real Apps Script backend, role comes back from the "login"
@@ -1786,12 +1845,11 @@
   // respond to a map click -- Canvassed addresses never does) which one of
   // those actually gets to handle the next click. Each of these drives both
   // a map layer and a whole sidebar section together -- see setOverlayOn().
-  // houseParties defaults on (same as precincts/canvassProgress) whenever
-  // it's configured at all (HOUSE_PARTIES_ENABLED) -- there's no separate
-  // "on but not configured" state to default to false for, since the
-  // checkbox row itself is simply left out of the Overlays list otherwise
-  // (see buildOverlaysChoices()).
-  var overlaysOn = { precincts: true, canvassProgress: true, districts: false, houseParties: HOUSE_PARTIES_ENABLED };
+  // houseParties and yardSigns both default OFF even when configured --
+  // unlike the other overlays, these are opt-in extras a visitor turns on
+  // themselves; the checkbox row is simply left out of the Overlays list
+  // entirely when unconfigured (see buildOverlaysChoices()), same as before.
+  var overlaysOn = { precincts: true, canvassProgress: true, districts: false, houseParties: false, yardSigns: false };
   var CLICKABLE_OVERLAYS = ["precincts", "districts"];
   // Which clickable overlay currently owns map clicks -- null when none of
   // CLICKABLE_OVERLAYS are on. Kept correct by updateClickableOverlayState(),
@@ -2346,6 +2404,7 @@
     setupFloatingPanelDrag($("precinct-panel"));
     setupFloatingPanelDrag($("district-panel"));
     setupFloatingPanelDrag($("houseparty-panel"));
+    setupFloatingPanelDrag($("yardsign-panel"));
     setupSidebarToggle();
 
     // Independent of the main Promise.all() below (see the House Parties
@@ -2355,6 +2414,11 @@
     if (HOUSE_PARTIES_ENABLED) {
       loadHouseParties();
       setInterval(loadHouseParties, HOUSE_PARTIES_POLL_MS);
+    }
+    // Same reasoning as House Parties above, entirely independent of it.
+    if (YARD_SIGNS_ENABLED) {
+      loadYardSigns();
+      setInterval(loadYardSigns, YARD_SIGNS_POLL_MS);
     }
 
     Promise.all([
@@ -2694,6 +2758,9 @@
     if (HOUSE_PARTIES_ENABLED) {
       choices.push({ key: "houseParties", label: "House parties", tintClass: "layers-choice-row-houseparties" });
     }
+    if (YARD_SIGNS_ENABLED) {
+      choices.push({ key: "yardSigns", label: "Yard signs", tintClass: "layers-choice-row-yardsigns" });
+    }
     choices.forEach(function (ov) {
       // A plain <div> row rather than a <label> -- a <label> forwards a
       // click anywhere inside it to its child <input>, which used to
@@ -2872,22 +2939,34 @@
           // Only built at all when a House Parties Sheet/Apps Script is
           // actually configured (see HOUSE_PARTIES_ENABLED) -- same reasoning
           // as buildOverlaysChoices() leaving its checkbox row out otherwise.
-          // Defaults on (matches overlaysOn.houseParties' own default), so
-          // (unlike legend-district-section above) it starts without
-          // [hidden].
+          // Defaults off (matches overlaysOn.houseParties' own default), so
+          // it starts [hidden], same as legend-district-section above.
           (HOUSE_PARTIES_ENABLED ?
-            '<div class="legend-section" id="legend-houseparty-section">' +
+            '<div class="legend-section" id="legend-houseparty-section" hidden>' +
               '<div class="sidebar-header"><h2>House parties</h2></div>' +
               '<div class="status-legend">' +
                 '<div class="legend-row"><span class="legend-icon-houseparty">' + HOUSE_PARTY_ICON_SVG + '</span><span class="legend-label">House party</span></div>' +
               '</div>' +
             '</div>'
+            : "") +
+          // Same reasoning as the House Parties section above, entirely
+          // independent of it -- two legend rows (one per pin color/status),
+          // per the "D" = Placed / "yes" = Wanted mapping in
+          // apps-script/YardSigns.gs's classifySignStatus_().
+          (YARD_SIGNS_ENABLED ?
+            '<div class="legend-section" id="legend-yardsign-section" hidden>' +
+              '<div class="sidebar-header"><h2>Yard signs</h2></div>' +
+              '<div class="status-legend">' +
+                '<div class="legend-row"><span class="legend-icon-yardsign">' + YARD_SIGN_ICON_SVG("var(--yardsign-placed-color)") + '</span><span class="legend-label">Placed</span></div>' +
+                '<div class="legend-row"><span class="legend-icon-yardsign">' + YARD_SIGN_ICON_SVG("var(--yardsign-wanted-color)") + '</span><span class="legend-label">Wanted</span></div>' +
+              '</div>' +
+            '</div>'
             : "");
         // Matches overlaysOn's own defaults (precincts/canvassProgress on,
-        // districts off) -- same convention the old static sidebar HTML
-        // used for these three sections' initial [hidden] state, kept in
-        // sync by hand rather than computed here, since setOverlayOn() is
-        // what takes over from this point on.
+        // districts/houseParties/yardSigns off) -- same convention the old
+        // static sidebar HTML used for these sections' initial [hidden]
+        // state, kept in sync by hand rather than computed here, since
+        // setOverlayOn() is what takes over from this point on.
         setupLegendDrag(container, container.querySelector("#map-legend-title-bar"));
         return container;
       }
@@ -2902,7 +2981,7 @@
   function updateLegendVisibility() {
     var legend = document.querySelector(".map-legend");
     if (!legend) return;
-    var anyVisible = ["precinct-progress-section", "legend-canvass-section", "legend-district-section", "legend-houseparty-section"].some(function (id) {
+    var anyVisible = ["precinct-progress-section", "legend-canvass-section", "legend-district-section", "legend-houseparty-section", "legend-yardsign-section"].some(function (id) {
       var el = $(id);
       return el && !el.hidden;
     });
@@ -3035,7 +3114,8 @@
     districts: ["district-list-section", "legend-district-section"],
     // No sidebar list section of its own -- just the map pins and the
     // legend entry.
-    houseParties: ["legend-houseparty-section"]
+    houseParties: ["legend-houseparty-section"],
+    yardSigns: ["legend-yardsign-section"]
   };
 
   // Central overlay on/off toggle -- everything that responds to an overlay
@@ -3093,6 +3173,13 @@
         // Same reasoning as precincts/districts above -- an open info panel
         // for a pin that's no longer even on the map shouldn't linger.
         if (openHousePartyMarker) closeHousePartyPanel();
+      }
+    } else if (key === "yardSigns") {
+      if (on) {
+        yardSignsLayer.addTo(map);
+      } else {
+        map.removeLayer(yardSignsLayer);
+        if (openYardSignMarker) closeYardSignPanel();
       }
     }
 
@@ -4674,6 +4761,113 @@
     $("houseparty-panel").hidden = true;
   }
 
+  // ================== YARD SIGNS OVERLAY ==================
+  // A separate, independently-configured Google Sheet/Apps Script backend
+  // (see apps-script/YardSigns.gs and CONFIG.YARD_SIGNS_URL/
+  // YARD_SIGNS_ENABLED above), entirely independent of both the main
+  // canvassing backend and the House Parties overlay above -- same
+  // fetch/draw-pins/click-a-pin/show-its-info shape as House Parties, just
+  // with two pin colors instead of one (see classifySignStatus_() in
+  // YardSigns.gs for what "placed" vs "wanted" means).
+  var yardSignsLayer = L.layerGroup();
+  var yardSignsData = [];
+  var openYardSignMarker = null; // the marker whose info panel is open, if any -- used only to reposition it (see repositionOpenYardSignPanel) as the map moves/zooms
+
+  // Which of the fields YardSigns.gs returns to show in the info panel, in
+  // order, with a friendly label. "status" itself becomes the panel's title
+  // (Placed/Wanted) instead of appearing in this list, same as Name does for
+  // the house-party panel's own HOUSEPARTY_META_FIELDS.
+  var YARDSIGN_META_FIELDS = [
+    { key: "address", label: "Address" }
+  ];
+  var YARDSIGN_STATUS_LABELS = { placed: "Placed", wanted: "Wanted" };
+
+  // A pin with a small yard-sign glyph inside (a placard on a post), colored
+  // per status via the `color` argument -- used both for the actual map
+  // marker (see yardSignIcon()) and, at a smaller size, the map legend's own
+  // "Placed"/"Wanted" rows (see addLegendControl()), so all three visibly
+  // match. Same pin outline as HOUSE_PARTY_ICON_SVG, just parameterized on
+  // color instead of a fixed CSS var, since this one needs two different
+  // colors rather than one fixed one.
+  function YARD_SIGN_ICON_SVG(color) {
+    return '<svg viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M13 0C5.8 0 0 5.8 0 13c0 9.75 13 21 13 21s13-11.25 13-21C26 5.8 20.2 0 13 0z" fill="' + color + '" stroke="#fff" stroke-width="1.5"/>' +
+      '<rect x="6.5" y="7" width="13" height="8.5" rx="1" fill="#fff"/>' +
+      '<rect x="12" y="15.5" width="2" height="5.5" fill="#fff"/>' +
+      "</svg>";
+  }
+
+  function yardSignIcon(status) {
+    var color = status === "placed" ? "var(--yardsign-placed-color)" : "var(--yardsign-wanted-color)";
+    return L.divIcon({
+      className: "yardsign-marker",
+      html: YARD_SIGN_ICON_SVG(color),
+      iconSize: [26, 34],
+      iconAnchor: [13, 34]   // the pin's own drawn tip, not its center -- same convention as a typical map-pin icon
+    });
+  }
+
+  // Fetched independently of DEMO_MODE/the main apps-script/Code.gs backend
+  // and of House Parties -- see YARD_SIGNS_ENABLED's own comment. A failure
+  // here (backend down, network hiccup) is swallowed rather than surfaced:
+  // whatever pins were already drawn from the last successful load just
+  // stay put instead of vanishing or blocking the rest of the map.
+  function loadYardSigns() {
+    fetch(CONFIG.YARD_SIGNS_URL)
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || !res.ok) return;
+        yardSignsData = res.yardSigns || [];
+        renderYardSigns();
+      })
+      .catch(function () { /* keep showing the last successful load */ });
+  }
+
+  function renderYardSigns() {
+    yardSignsLayer.clearLayers();
+    yardSignsData.forEach(function (sign) {
+      if (typeof sign.lat !== "number" || typeof sign.lng !== "number") return;
+      var marker = L.marker([sign.lat, sign.lng], { icon: yardSignIcon(sign.status) });
+      marker.on("click", function () { openYardSignPanel(sign, marker); });
+      yardSignsLayer.addLayer(marker);
+    });
+    if (overlaysOn.yardSigns) yardSignsLayer.addTo(map);
+  }
+
+  function renderYardSignMeta(sign) {
+    var container = $("yardsign-meta");
+    var html = [];
+    YARDSIGN_META_FIELDS.forEach(function (f) {
+      var raw = sign[f.key];
+      if (raw === undefined || raw === null || raw === "") return;
+      html.push('<div class="yardsign-meta-row"><span class="field-label">' + escapeHtml(f.label) +
+        '</span><div class="yardsign-meta-value">' + escapeHtml(String(raw)) + "</div></div>");
+    });
+    container.innerHTML = html.join("");
+  }
+
+  function openYardSignPanel(sign, marker) {
+    openYardSignMarker = marker;
+    $("yardsign-panel-title").textContent = YARDSIGN_STATUS_LABELS[sign.status] || "Yard Sign";
+    renderYardSignMeta(sign);
+    $("yardsign-panel").hidden = false;
+    positionPanelNearLatLng($("yardsign-panel"), marker.getLatLng());
+    map.on("moveend zoomend", repositionOpenYardSignPanel);
+  }
+
+  function repositionOpenYardSignPanel() {
+    if (openYardSignMarker && !$("yardsign-panel").dataset.dragging) {
+      positionPanelNearLatLng($("yardsign-panel"), openYardSignMarker.getLatLng());
+    }
+  }
+
+  function closeYardSignPanel() {
+    if (!openYardSignMarker) return;
+    openYardSignMarker = null;
+    map.off("moveend zoomend", repositionOpenYardSignPanel);
+    $("yardsign-panel").hidden = true;
+  }
+
   // Same settle-detection approach as zoomToFitPrecinct (see its own
   // comment for the reasoning) -- onDone only fires once the fly-to-bounds
   // animation has actually finished, not on the first of possibly several
@@ -4849,6 +5043,7 @@
   // house party's panel never flies/zooms the map in the first place (see
   // openHousePartyPanel()), so there's nothing to fly back out of.
   $("houseparty-cancel").addEventListener("click", function () { closeHousePartyPanel(); });
+  $("yardsign-cancel").addEventListener("click", function () { closeYardSignPanel(); });
 
   $("precinct-save").addEventListener("click", async function () {
     // Defense in depth -- the Save button is hidden entirely for a viewer
@@ -4907,6 +5102,7 @@
     if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true, { zoomOut: true });
     if (e.key === "Escape" && openDistrictId) closeDistrictPanel({ zoomOut: true });
     if (e.key === "Escape" && openHousePartyMarker) closeHousePartyPanel();
+    if (e.key === "Escape" && openYardSignMarker) closeYardSignPanel();
   });
 
   // ================== SWIPE TO MARK WALKED ==================
