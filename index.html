@@ -78,6 +78,21 @@
     --tint-precincts: rgba(43, 96, 171, 0.40);
     --tint-canvass: rgba(96, 171, 43, 0.40);
     --tint-districts: rgba(171, 43, 96, 0.40);
+    /* A fourth overlay tint, added later (House parties -- see
+       OVERLAY_TINT_HOUSEPARTIES_HEX in the JS below) -- an orange/brown hue
+       roughly halfway between the district (335 deg) and canvass (95 deg)
+       hues going the "long way" around, keeping it 60 degrees from each of
+       its two nearest neighbors in the original 3-way triad rather than
+       reshuffling all four to a perfectly even 90-degrees-apart split (which
+       would mean recoloring the three existing, already-familiar tints too). */
+    --tint-houseparties: rgba(171, 118, 43, 0.40);
+
+    /* The actual house-party map pin/legend icon color -- unrelated to the
+       sidebar-row tint above (same as, say, --walked-color being unrelated to
+       --tint-canvass): a distinct pink/rose so it doesn't get lost among the
+       existing precinct-status reds/yellows/greens/purples, the district
+       outline blue, or the walked-parcel near-black. */
+    --houseparty-color: #D6336C;
   }
 
   /* Dark mode is intentionally NOT wired to prefers-color-scheme: the app
@@ -539,6 +554,9 @@
   #legend-district-section .sidebar-header {
     background: linear-gradient(180deg, var(--tint-districts), transparent 85%);
   }
+  #legend-houseparty-section .sidebar-header {
+    background: linear-gradient(180deg, var(--tint-houseparties), transparent 85%);
+  }
 
   .sidebar-search-input {
     width: 100%;
@@ -634,6 +652,13 @@
     border: 3px solid #1D4ED8; /* matches DISTRICT_BORDER_HEX in the JS below */
     box-sizing: border-box;
   }
+  /* House parties get the actual pin glyph in the legend (see
+     HOUSE_PARTY_ICON_SVG in the JS below) rather than a plain swatch --
+     a pin shape is taller than it is wide, so this reuses .legend-row's
+     own gap/alignment but sizes itself to the icon's own proportions
+     instead of .legend-swatch's fixed square. */
+  .legend-icon-houseparty { width: 13px; height: 17px; flex-shrink: 0; display: flex; align-items: center; }
+  .legend-icon-houseparty svg { display: block; width: 100%; height: 100%; }
 
   /* ---------- map legend (bottom-right map control) ---------- */
   /* One .legend-section per overlay that's currently on -- built by
@@ -797,6 +822,7 @@
   .layers-choice-row-precincts { background: linear-gradient(180deg, var(--tint-precincts), transparent 85%); }
   .layers-choice-row-canvass { background: linear-gradient(180deg, var(--tint-canvass), transparent 85%); }
   .layers-choice-row-districts { background: linear-gradient(180deg, var(--tint-districts), transparent 85%); }
+  .layers-choice-row-houseparties { background: linear-gradient(180deg, var(--tint-houseparties), transparent 85%); }
 
   /* Marks whichever Overlays row (precincts or districts -- canvassProgress
      is never clickable, see CLICKABLE_OVERLAYS) is the current clickable
@@ -1114,6 +1140,24 @@
     border-radius: 8px;
     border: 1px solid var(--border);
   }
+
+  /* ---------- house party panel metadata ---------- */
+  /* Label-above-value (rather than district-meta-row's side-by-side
+     label:value) -- several of these fields (Notes & Status, Volunteer
+     helpers/attendees) can run to a sentence or more, which reads badly
+     squeezed into a right-aligned column next to its label. */
+  #houseparty-meta { margin-top: 4px; }
+  .houseparty-meta-row {
+    padding: 7px 0;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .houseparty-meta-row:first-child { border-top: none; }
+  .houseparty-meta-row .field-label { margin-bottom: 2px; }
+  .houseparty-meta-row .houseparty-meta-value { color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+
+  /* ---------- house party map marker ---------- */
+  .houseparty-marker svg { display: block; }
 
   .dialog-actions {
     display: flex;
@@ -1560,6 +1604,15 @@
     </div>
   </div>
 
+  <!-- ============ HOUSE PARTY PANEL (floating, read-only info from the separate House Parties sheet) ============ -->
+  <div class="precinct-panel" id="houseparty-panel" hidden>
+    <h3 id="houseparty-panel-title">House Party</h3>
+    <div id="houseparty-meta"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="houseparty-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+
   <!-- ============ SETTINGS PANEL (hideable; colors + default basemap) ============ -->
   <div class="settings-panel" id="settings-panel" hidden>
     <div class="settings-panel-header">
@@ -1644,6 +1697,12 @@
   // (Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone).
   var CONFIG = {
     APPS_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbw7SiYOrUjcMo6oCpOd7F-R7UiMDJ62rFC-WHV7E2h1lkAd9iupGtkA_oARazYAFyXuCw/exec",
+    // Optional, and completely separate from APPS_SCRIPT_URL above -- its own
+    // Google Sheet and its own Apps Script deployment (see
+    // apps-script/HouseParties.gs), for the House parties overlay. Leave this
+    // as "PASTE_YOUR..." (or blank) to leave that overlay off entirely; see
+    // HOUSE_PARTIES_ENABLED below.
+    HOUSE_PARTIES_URL: "PASTE_YOUR_HOUSE_PARTIES_APPS_SCRIPT_WEB_APP_URL_HERE",
     CITY_BOUNDARY_URL: "data/city_boundary.geojson",
     PARCELS_URL: "data/parcels.geojson",
     PRECINCTS_URL: "data/precincts.geojson",
@@ -1669,6 +1728,17 @@
   function getNeighborhoodZoom() { return isPhoneSize() ? CONFIG.NEIGHBORHOOD_ZOOM_PHONE : CONFIG.NEIGHBORHOOD_ZOOM_DESKTOP; }
 
   var DEMO_MODE = !CONFIG.APPS_SCRIPT_URL || CONFIG.APPS_SCRIPT_URL.indexOf("PASTE_YOUR") === 0;
+  // Independent of DEMO_MODE above -- House parties has its own separate
+  // Sheet/Apps Script (see CONFIG.HOUSE_PARTIES_URL), so it can be on even
+  // while the main canvassing backend is unconfigured, or left off (the
+  // common case for anyone who hasn't set up a House Parties sheet at all)
+  // while the main app is fully live.
+  var HOUSE_PARTIES_ENABLED = !!CONFIG.HOUSE_PARTIES_URL && CONFIG.HOUSE_PARTIES_URL.indexOf("PASTE_YOUR") !== 0;
+  // Much less time-sensitive than the 20-second precinct/parcel sync poll --
+  // a new house party added to the Sheet doesn't need to appear within
+  // seconds, and geocoding cache lookups aside, this is a full re-fetch of
+  // the sheet each time rather than a since-last-check delta.
+  var HOUSE_PARTIES_POLL_MS = 60000;
   var demoUsers = {};     // username(lowercased) -> {password, displayName}                 (demo mode only)
   // Demo-mode-only role assignments (no real Users sheet to read from here).
   // Against the real Apps Script backend, role comes back from the "login"
@@ -1716,7 +1786,12 @@
   // respond to a map click -- Canvassed addresses never does) which one of
   // those actually gets to handle the next click. Each of these drives both
   // a map layer and a whole sidebar section together -- see setOverlayOn().
-  var overlaysOn = { precincts: true, canvassProgress: true, districts: false };
+  // houseParties defaults on (same as precincts/canvassProgress) whenever
+  // it's configured at all (HOUSE_PARTIES_ENABLED) -- there's no separate
+  // "on but not configured" state to default to false for, since the
+  // checkbox row itself is simply left out of the Overlays list otherwise
+  // (see buildOverlaysChoices()).
+  var overlaysOn = { precincts: true, canvassProgress: true, districts: false, houseParties: HOUSE_PARTIES_ENABLED };
   var CLICKABLE_OVERLAYS = ["precincts", "districts"];
   // Which clickable overlay currently owns map clicks -- null when none of
   // CLICKABLE_OVERLAYS are on. Kept correct by updateClickableOverlayState(),
@@ -2270,7 +2345,17 @@
     setupSettingsPanelDrag();
     setupFloatingPanelDrag($("precinct-panel"));
     setupFloatingPanelDrag($("district-panel"));
+    setupFloatingPanelDrag($("houseparty-panel"));
     setupSidebarToggle();
+
+    // Independent of the main Promise.all() below (see the House Parties
+    // Overlay section's own comment) -- fired now, right at boot, so pins
+    // show up as soon as they're geocoded rather than waiting on the main
+    // canvassing data to finish loading first.
+    if (HOUSE_PARTIES_ENABLED) {
+      loadHouseParties();
+      setInterval(loadHouseParties, HOUSE_PARTIES_POLL_MS);
+    }
 
     Promise.all([
       fetch(CONFIG.CITY_BOUNDARY_URL).then(function (r) { return r.json(); }),
@@ -2597,11 +2682,19 @@
   // but moved out to the sidebar per explicit request, so it's visible
   // without opening that menu at all.
   function buildOverlaysChoices(container) {
-    [
+    var choices = [
       { key: "precincts", label: "Voter precincts", tintClass: "layers-choice-row-precincts" },
       { key: "canvassProgress", label: "Canvassed addresses", tintClass: "layers-choice-row-canvass" },
       { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
-    ].forEach(function (ov) {
+    ];
+    // Only offered at all once a House Parties Sheet/Apps Script is actually
+    // configured (see HOUSE_PARTIES_ENABLED) -- otherwise there's nothing
+    // for the checkbox to turn on, so it's left out entirely rather than
+    // shown disabled or perpetually unchecked.
+    if (HOUSE_PARTIES_ENABLED) {
+      choices.push({ key: "houseParties", label: "House parties", tintClass: "layers-choice-row-houseparties" });
+    }
+    choices.forEach(function (ov) {
       // A plain <div> row rather than a <label> -- a <label> forwards a
       // click anywhere inside it to its child <input>, which used to
       // mean clicking the overlay's NAME toggled it on/off exactly like
@@ -2775,7 +2868,21 @@
             '<div class="status-legend">' +
               '<div class="legend-row"><span class="legend-swatch legend-swatch-outline"></span><span class="legend-label">District outline</span></div>' +
             '</div>' +
-          '</div>';
+          '</div>' +
+          // Only built at all when a House Parties Sheet/Apps Script is
+          // actually configured (see HOUSE_PARTIES_ENABLED) -- same reasoning
+          // as buildOverlaysChoices() leaving its checkbox row out otherwise.
+          // Defaults on (matches overlaysOn.houseParties' own default), so
+          // (unlike legend-district-section above) it starts without
+          // [hidden].
+          (HOUSE_PARTIES_ENABLED ?
+            '<div class="legend-section" id="legend-houseparty-section">' +
+              '<div class="sidebar-header"><h2>House parties</h2></div>' +
+              '<div class="status-legend">' +
+                '<div class="legend-row"><span class="legend-icon-houseparty">' + HOUSE_PARTY_ICON_SVG + '</span><span class="legend-label">House party</span></div>' +
+              '</div>' +
+            '</div>'
+            : "");
         // Matches overlaysOn's own defaults (precincts/canvassProgress on,
         // districts off) -- same convention the old static sidebar HTML
         // used for these three sections' initial [hidden] state, kept in
@@ -2795,7 +2902,7 @@
   function updateLegendVisibility() {
     var legend = document.querySelector(".map-legend");
     if (!legend) return;
-    var anyVisible = ["precinct-progress-section", "legend-canvass-section", "legend-district-section"].some(function (id) {
+    var anyVisible = ["precinct-progress-section", "legend-canvass-section", "legend-district-section", "legend-houseparty-section"].some(function (id) {
       var el = $(id);
       return el && !el.hidden;
     });
@@ -2925,7 +3032,10 @@
   var OVERLAY_SECTIONS = {
     precincts: ["precinct-progress-section", "precinct-list-section"],
     canvassProgress: ["address-list-section", "legend-canvass-section"],
-    districts: ["district-list-section", "legend-district-section"]
+    districts: ["district-list-section", "legend-district-section"],
+    // No sidebar list section of its own -- just the map pins and the
+    // legend entry.
+    houseParties: ["legend-houseparty-section"]
   };
 
   // Central overlay on/off toggle -- everything that responds to an overlay
@@ -2974,6 +3084,15 @@
             highlightDistrictListItem(null);
           }
         }
+      }
+    } else if (key === "houseParties") {
+      if (on) {
+        housePartiesLayer.addTo(map);
+      } else {
+        map.removeLayer(housePartiesLayer);
+        // Same reasoning as precincts/districts above -- an open info panel
+        // for a pin that's no longer even on the map shouldn't linger.
+        if (openHousePartyMarker) closeHousePartyPanel();
       }
     }
 
@@ -4429,6 +4548,132 @@
     if (openDistrictId && !$("district-panel").dataset.dragging) positionDistrictPanel(openDistrictId);
   }
 
+  // ================== HOUSE PARTIES OVERLAY ==================
+  // A separate, independently-configured Google Sheet/Apps Script backend
+  // (see apps-script/HouseParties.gs and CONFIG.HOUSE_PARTIES_URL/
+  // HOUSE_PARTIES_ENABLED above) from the rest of this app's canvassing
+  // data. Deliberately NOT folded into the boot Promise.all() below (see
+  // its own comment) or into the precinct/district "select it, fly to it,
+  // highlight it in a list" machinery -- there's no sidebar list for house
+  // parties to select from, just pins you click directly on the map, so
+  // this stays a much smaller, self-contained read-only feature: fetch,
+  // draw pins, click a pin, show its info, done.
+  var housePartiesLayer = L.layerGroup();
+  var housePartiesData = [];
+  var openHousePartyMarker = null; // the marker whose info panel is open, if any -- used only to reposition it (see repositionOpenHousePartyPanel) as the map moves/zooms
+
+  // Which of the fields HouseParties.gs returns to show in the info panel,
+  // in order, with a friendly label -- Name itself becomes the panel's
+  // title instead of appearing in this list (same as District/Label do for
+  // the district panel's own DISTRICT_META_FIELDS). "Notes & Status" is a
+  // deliberately shortened label for the sheet's actual "Notes & Status --
+  // please date entries" column, per explicit request.
+  var HOUSEPARTY_META_FIELDS = [
+    { key: "dayTime", label: "Day-time" },
+    { key: "address", label: "Address" },
+    { key: "phone", label: "Phone", type: "tel" },
+    { key: "email", label: "Email", type: "email" },
+    { key: "notes", label: "Notes & Status" },
+    { key: "contact", label: "Campaign contact person" },
+    { key: "volunteers", label: "Volunteer helpers/attendees" }
+  ];
+
+  // A pin with a small house glyph inside, rather than a plain dot -- used
+  // both for the actual map marker (see housePartyIcon()) and, at a smaller
+  // size, the map legend's own "House party" row (see addLegendControl()),
+  // so the two visibly match.
+  var HOUSE_PARTY_ICON_SVG =
+    '<svg viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M13 0C5.8 0 0 5.8 0 13c0 9.75 13 21 13 21s13-11.25 13-21C26 5.8 20.2 0 13 0z" fill="var(--houseparty-color)" stroke="#fff" stroke-width="1.5"/>' +
+    '<path d="M13 6.5l6.5 5.6V21h-4.3v-5.6h-4.4V21H6.5v-8.9z" fill="#fff"/>' +
+    "</svg>";
+
+  function housePartyIcon() {
+    return L.divIcon({
+      className: "houseparty-marker",
+      html: HOUSE_PARTY_ICON_SVG,
+      iconSize: [26, 34],
+      iconAnchor: [13, 34]   // the pin's own drawn tip, not its center -- same convention as a typical map-pin icon
+    });
+  }
+
+  // Fetched independently of DEMO_MODE/the main apps-script/Code.gs
+  // backend -- see HOUSE_PARTIES_ENABLED's own comment. A failure here
+  // (backend down, network hiccup) is swallowed rather than surfaced:
+  // whatever pins were already drawn from the last successful load just
+  // stay put instead of vanishing or blocking the rest of the map.
+  function loadHouseParties() {
+    fetch(CONFIG.HOUSE_PARTIES_URL)
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res || !res.ok) return;
+        housePartiesData = res.houseParties || [];
+        renderHouseParties();
+      })
+      .catch(function () { /* keep showing the last successful load */ });
+  }
+
+  function renderHouseParties() {
+    housePartiesLayer.clearLayers();
+    housePartiesData.forEach(function (party) {
+      if (typeof party.lat !== "number" || typeof party.lng !== "number") return;
+      var marker = L.marker([party.lat, party.lng], { icon: housePartyIcon() });
+      marker.on("click", function () { openHousePartyPanel(party, marker); });
+      housePartiesLayer.addLayer(marker);
+    });
+    if (overlaysOn.houseParties) housePartiesLayer.addTo(map);
+  }
+
+  function renderHousePartyMeta(party) {
+    var container = $("houseparty-meta");
+    var html = [];
+    HOUSEPARTY_META_FIELDS.forEach(function (f) {
+      var raw = party[f.key];
+      if (raw === undefined || raw === null || raw === "") return;
+      var value = String(raw);
+      if (f.type === "email") {
+        html.push('<div class="houseparty-meta-row"><span class="field-label">' + escapeHtml(f.label) +
+          '</span><div class="houseparty-meta-value"><a href="mailto:' + escapeHtml(value) + '">' + escapeHtml(value) + "</a></div></div>");
+      } else if (f.type === "tel") {
+        html.push('<div class="houseparty-meta-row"><span class="field-label">' + escapeHtml(f.label) +
+          '</span><div class="houseparty-meta-value"><a href="tel:' + escapeHtml(value) + '">' + escapeHtml(value) + "</a></div></div>");
+      } else {
+        html.push('<div class="houseparty-meta-row"><span class="field-label">' + escapeHtml(f.label) +
+          '</span><div class="houseparty-meta-value">' + escapeHtml(value) + "</div></div>");
+      }
+    });
+    container.innerHTML = html.join("");
+  }
+
+  // Reuses positionPanelNearBounds() (built for a GeoJSON shape's real
+  // bounds) by wrapping the single point in a tiny bounding box around
+  // itself -- there's no shape here, just a marker's lat/lng.
+  function positionPanelNearLatLng(panel, latlng) {
+    positionPanelNearBounds(panel, L.latLng(latlng).toBounds(30));
+  }
+
+  function openHousePartyPanel(party, marker) {
+    openHousePartyMarker = marker;
+    $("houseparty-panel-title").textContent = party.name || "House Party";
+    renderHousePartyMeta(party);
+    $("houseparty-panel").hidden = false;
+    positionPanelNearLatLng($("houseparty-panel"), marker.getLatLng());
+    map.on("moveend zoomend", repositionOpenHousePartyPanel);
+  }
+
+  function repositionOpenHousePartyPanel() {
+    if (openHousePartyMarker && !$("houseparty-panel").dataset.dragging) {
+      positionPanelNearLatLng($("houseparty-panel"), openHousePartyMarker.getLatLng());
+    }
+  }
+
+  function closeHousePartyPanel() {
+    if (!openHousePartyMarker) return;
+    openHousePartyMarker = null;
+    map.off("moveend zoomend", repositionOpenHousePartyPanel);
+    $("houseparty-panel").hidden = true;
+  }
+
   // Same settle-detection approach as zoomToFitPrecinct (see its own
   // comment for the reasoning) -- onDone only fires once the fly-to-bounds
   // animation has actually finished, not on the first of possibly several
@@ -4600,6 +4845,11 @@
 
   $("district-cancel").addEventListener("click", function () { closeDistrictPanel({ zoomOut: true }); });
 
+  // No zoomOut here, unlike precinct/district Cancel above -- opening a
+  // house party's panel never flies/zooms the map in the first place (see
+  // openHousePartyPanel()), so there's nothing to fly back out of.
+  $("houseparty-cancel").addEventListener("click", function () { closeHousePartyPanel(); });
+
   $("precinct-save").addEventListener("click", async function () {
     // Defense in depth -- the Save button is hidden entirely for a viewer
     // (see applyPrecinctPanelRoleGating()), and the real backend also
@@ -4656,6 +4906,7 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && openPrecinctId) closePrecinctPanel(true, { zoomOut: true });
     if (e.key === "Escape" && openDistrictId) closeDistrictPanel({ zoomOut: true });
+    if (e.key === "Escape" && openHousePartyMarker) closeHousePartyPanel();
   });
 
   // ================== SWIPE TO MARK WALKED ==================
