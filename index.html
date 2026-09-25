@@ -1493,7 +1493,7 @@
 
 <!-- ============ APP ============ -->
 <div id="topbar">
-  <div class="brand"><span class="dot"></span>Ami 4 Mayor Strategic Planning Map</div>
+  <div class="brand"><span class="dot"></span>Ami 4 Mayor Planning Map</div>
   <div id="user-chip">
     <span id="online-users-chip" hidden></span>
     <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
@@ -1632,12 +1632,13 @@
   <!-- ============ DISTRICT PANEL (floating, tracks the selected district) ============ -->
   <!-- Read-only -- just the district's own geojson properties, no
        editing/saving like the precinct panel above, so there's only a
-       Cancel button. -->
+       Close button (nothing to discard, unlike the precinct panel's
+       Cancel/Save pair). -->
   <div class="precinct-panel" id="district-panel" hidden>
     <h3 id="district-panel-title">District</h3>
     <div id="district-meta"></div>
     <div class="dialog-actions">
-      <button class="btn" id="district-cancel" type="button">Cancel</button>
+      <button class="btn" id="district-cancel" type="button">Close</button>
     </div>
   </div>
 
@@ -1646,7 +1647,7 @@
     <h3 id="houseparty-panel-title">House Party</h3>
     <div id="houseparty-meta"></div>
     <div class="dialog-actions">
-      <button class="btn" id="houseparty-cancel" type="button">Cancel</button>
+      <button class="btn" id="houseparty-cancel" type="button">Close</button>
     </div>
   </div>
 
@@ -1655,7 +1656,7 @@
     <h3 id="yardsign-panel-title">Yard Sign</h3>
     <div id="yardsign-meta"></div>
     <div class="dialog-actions">
-      <button class="btn" id="yardsign-cancel" type="button">Cancel</button>
+      <button class="btn" id="yardsign-cancel" type="button">Close</button>
     </div>
   </div>
 
@@ -3862,6 +3863,11 @@
     // screen together. See deselectDistrict()'s comment for why this can't
     // just be closeDistrictPanel().
     deselectDistrict();
+    // Same reasoning for a house party or yard sign panel left open from an
+    // earlier click -- close it right away rather than leaving it on screen
+    // for the whole fly-to-precinct animation (openPrecinctPanel() itself
+    // also does this, but only once that animation finishes -- see below).
+    closeOtherMapPanels("precinct");
     var previous = selectedPrecinctId;
     selectedPrecinctId = id;
     if (previous && previous !== id) {
@@ -4244,6 +4250,10 @@
     // Only one overlay item can be selected at a time -- mirror of the
     // deselectDistrict() call in selectPrecinct() above.
     deselectPrecinct();
+    // Same reasoning as selectPrecinct() -- close a leftover house party or
+    // yard sign panel right away rather than partway through the
+    // fly-to-district animation.
+    closeOtherMapPanels("district");
     var previous = selectedDistrictId;
     selectedDistrictId = id;
     if (previous && previous !== id) restyleDistrict(previous);
@@ -4413,8 +4423,27 @@
     });
   }
 
+  // Only one of the four floating map panels (precinct, district, house
+  // party, yard sign) is ever shown at once -- they can overlap on screen
+  // since each is positioned next to whatever it's about, and a leftover
+  // panel from an earlier click (e.g. a house party's info panel still open
+  // when a precinct gets selected) would otherwise linger alongside the new
+  // one. Precinct <-> district already deselect each other directly (see
+  // deselectDistrict()/deselectPrecinct(), called from selectPrecinct()/
+  // selectDistrict()); this covers the other combinations -- house party and
+  // yard sign markers don't go through a "select" wrapper, they just open
+  // their panel straight from the marker's click handler. exceptType is
+  // whichever panel is ABOUT to open, so that one is left alone.
+  function closeOtherMapPanels(exceptType) {
+    if (exceptType !== "precinct" && openPrecinctId) closePrecinctPanel(true, { keepSelectionState: true });
+    if (exceptType !== "district" && openDistrictId) closeDistrictPanel({ keepSelectionState: true });
+    if (exceptType !== "houseparty" && openHousePartyMarker) closeHousePartyPanel();
+    if (exceptType !== "yardsign" && openYardSignMarker) closeYardSignPanel();
+  }
+
   // ================== PRECINCT PANEL ==================
   function openPrecinctPanel(id) {
+    closeOtherMapPanels("precinct");
     // Closing a different, previously-open precinct's panel now happens
     // synchronously in selectPrecinct(), immediately on click -- not here --
     // since this function itself is deferred until the fly-to-precinct
@@ -4587,6 +4616,7 @@
   }
 
   function openDistrictPanel(id) {
+    closeOtherMapPanels("district");
     openDistrictId = id;
     $("district-panel-title").textContent = districtLabel(id);
     renderDistrictMeta(id);
@@ -4705,20 +4735,47 @@
     });
   }
 
+  // How soon to try again, just once, after a failed/unparseable poll --
+  // see loadHouseParties()'s own comment for why this happens at all. Well
+  // under HOUSE_PARTIES_POLL_MS so a one-off slow request self-heals in
+  // seconds rather than up to a full minute.
+  var HOUSE_PARTIES_RETRY_MS = 8000;
+
   // Fetched independently of DEMO_MODE/the main apps-script/Code.gs
   // backend -- see HOUSE_PARTIES_ENABLED's own comment. A failure here
   // (backend down, network hiccup) is swallowed rather than surfaced:
   // whatever pins were already drawn from the last successful load just
   // stay put instead of vanishing or blocking the rest of the map.
-  function loadHouseParties() {
+  //
+  // A failure also includes a request that simply took too long: this
+  // sheet's doGet() geocodes any brand-new (or retry-cooldown-expired)
+  // address INLINE before responding, and Apps Script's own redirect-based
+  // delivery (the request bounces through a script.googleusercontent.com/
+  // macros/echo URL) has a real-world ceiling around 30 seconds -- past
+  // that, the browser gets a 404 on that echo URL instead of the actual
+  // JSON, even though the script itself keeps running server-side and
+  // still writes the newly-geocoded coordinates to the Geocode tab. So a
+  // slow request isn't really "failed," it's just late -- the very next
+  // poll normally succeeds fast since everything's cached by then. Rather
+  // than making the user wait out the rest of a full HOUSE_PARTIES_POLL_MS
+  // interval for that natural recovery, retry once after a short delay
+  // (isRetry guards against retrying forever if the backend is genuinely,
+  // persistently broken -- in that case this falls back to the normal poll
+  // cadence instead of hammering it every few seconds).
+  function loadHouseParties(isRetry) {
     fetch(CONFIG.HOUSE_PARTIES_URL)
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res || !res.ok) return;
+        if (!res || !res.ok) { retryLoadHouseParties(isRetry); return; }
         housePartiesData = res.houseParties || [];
         renderHouseParties();
       })
-      .catch(function () { /* keep showing the last successful load */ });
+      .catch(function () { retryLoadHouseParties(isRetry); });
+  }
+
+  function retryLoadHouseParties(isRetry) {
+    if (isRetry) return; // already on the retry attempt -- wait for the next regular poll instead
+    setTimeout(function () { loadHouseParties(true); }, HOUSE_PARTIES_RETRY_MS);
   }
 
   function renderHouseParties() {
@@ -4761,6 +4818,7 @@
   }
 
   function openHousePartyPanel(party, marker) {
+    closeOtherMapPanels("houseparty");
     openHousePartyMarker = marker;
     $("houseparty-panel-title").textContent = party.name || "House Party";
     renderHousePartyMeta(party);
@@ -4796,11 +4854,13 @@
 
   // Which of the fields YardSigns.gs returns to show in the info panel, in
   // order, with a friendly label. "status" itself becomes the panel's title
-  // (Placed/Wanted) instead of appearing in this list. "name" comes from an
-  // optional "Name" column on the Yard Signs data tab -- a row with no Name
-  // column, or a blank cell in it, just leaves that line out of the panel
-  // rather than showing it empty (same defensive pattern as every other
-  // optional field here and in HOUSEPARTY_META_FIELDS).
+  // (Placed/Wanted) instead of appearing in this list. "name" comes from the
+  // optional "First Name"/"Last Name" columns on the Yard Signs data tab,
+  // combined server-side into one full name (or a single "Name" column as a
+  // fallback) -- a row with none of those columns, or blank cells in them,
+  // just leaves that line out of the panel rather than showing it empty
+  // (same defensive pattern as every other optional field here and in
+  // HOUSEPARTY_META_FIELDS).
   var YARDSIGN_META_FIELDS = [
     { key: "name", label: "Name" },
     { key: "address", label: "Address" }
@@ -4832,20 +4892,33 @@
     });
   }
 
+  // Same short-retry-once reasoning as HOUSE_PARTIES_RETRY_MS above -- see
+  // loadHouseParties()'s comment for the full explanation of why a poll can
+  // be slow enough to 404 on Apps Script's own echo-redirect delivery.
+  var YARD_SIGNS_RETRY_MS = 8000;
+
   // Fetched independently of DEMO_MODE/the main apps-script/Code.gs backend
   // and of House Parties -- see YARD_SIGNS_ENABLED's own comment. A failure
   // here (backend down, network hiccup) is swallowed rather than surfaced:
   // whatever pins were already drawn from the last successful load just
-  // stay put instead of vanishing or blocking the rest of the map.
-  function loadYardSigns() {
+  // stay put instead of vanishing or blocking the rest of the map. Also
+  // retries once shortly after a slow/failed poll rather than waiting out
+  // the rest of a full YARD_SIGNS_POLL_MS interval -- see
+  // loadHouseParties()'s comment for why.
+  function loadYardSigns(isRetry) {
     fetch(CONFIG.YARD_SIGNS_URL)
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res || !res.ok) return;
+        if (!res || !res.ok) { retryLoadYardSigns(isRetry); return; }
         yardSignsData = res.yardSigns || [];
         renderYardSigns();
       })
-      .catch(function () { /* keep showing the last successful load */ });
+      .catch(function () { retryLoadYardSigns(isRetry); });
+  }
+
+  function retryLoadYardSigns(isRetry) {
+    if (isRetry) return; // already on the retry attempt -- wait for the next regular poll instead
+    setTimeout(function () { loadYardSigns(true); }, YARD_SIGNS_RETRY_MS);
   }
 
   function renderYardSigns() {
@@ -4872,6 +4945,7 @@
   }
 
   function openYardSignPanel(sign, marker) {
+    closeOtherMapPanels("yardsign");
     openYardSignMarker = marker;
     $("yardsign-panel-title").textContent = YARDSIGN_STATUS_LABELS[sign.status] || "Yard Sign";
     renderYardSignMeta(sign);
@@ -5064,7 +5138,7 @@
 
   $("district-cancel").addEventListener("click", function () { closeDistrictPanel({ zoomOut: true }); });
 
-  // No zoomOut here, unlike precinct/district Cancel above -- opening a
+  // No zoomOut here, unlike precinct/district Close/Cancel above -- opening a
   // house party's panel never flies/zooms the map in the first place (see
   // openHousePartyPanel()), so there's nothing to fly back out of.
   $("houseparty-cancel").addEventListener("click", function () { closeHousePartyPanel(); });
