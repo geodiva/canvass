@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ami 4 Mayor Canvass Progress Map</title>
+<title>Ami 4 Mayor Strategic Planning Map</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1490,7 +1490,7 @@
 
 <!-- ============ APP ============ -->
 <div id="topbar">
-  <div class="brand"><span class="dot"></span>Ami 4 Mayor Canvass Progress Map</div>
+  <div class="brand"><span class="dot"></span>Ami 4 Mayor Strategic Planning Map</div>
   <div id="user-chip">
     <span id="online-users-chip" hidden></span>
     <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
@@ -4775,9 +4775,13 @@
 
   // Which of the fields YardSigns.gs returns to show in the info panel, in
   // order, with a friendly label. "status" itself becomes the panel's title
-  // (Placed/Wanted) instead of appearing in this list, same as Name does for
-  // the house-party panel's own HOUSEPARTY_META_FIELDS.
+  // (Placed/Wanted) instead of appearing in this list. "name" comes from an
+  // optional "Name" column on the Yard Signs data tab -- a row with no Name
+  // column, or a blank cell in it, just leaves that line out of the panel
+  // rather than showing it empty (same defensive pattern as every other
+  // optional field here and in HOUSEPARTY_META_FIELDS).
   var YARDSIGN_META_FIELDS = [
+    { key: "name", label: "Name" },
     { key: "address", label: "Address" }
   ];
   var YARDSIGN_STATUS_LABELS = { placed: "Placed", wanted: "Wanted" };
