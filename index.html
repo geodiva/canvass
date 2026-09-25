@@ -384,11 +384,14 @@
      instead of a small floating one. */
   .sidebar-toggle-btn {
     position: absolute;
-    /* Same top offset whether the sidebar is open or collapsed -- and well
-       clear of the Layers menu control's icon, which sits in this same
-       top-right corner once the map expands into the sidebar's freed-up
-       space while collapsed. */
-    top: 110px;
+    /* Vertically centered on the sidebar/map boundary -- same position
+       whether the sidebar is open or collapsed, since this only depends on
+       the viewport's own height, not the sidebar's width (that part is
+       still handled by the `right` formula below). Comfortably clear of the
+       Layers menu control's icon (top-right) and the zoom/locate/home
+       controls (bottom-left) either way. */
+    top: 50%;
+    transform: translateY(-50%);
     /* A single formula for BOTH the open and collapsed resting spots,
        instead of two separate rules (a fixed "left" while open, a fixed
        "right" once collapsed) swapped instantly the moment the collapsed
@@ -505,7 +508,7 @@
      (updateSidebarSectionBorders(), called by setOverlayOn()). */
   .sidebar-section.sidebar-section-last { border-bottom: none; }
   /* A little breathing room between the three search/list sections
-     (Voter precincts / Canvassed addresses / City council districts) -- previously
+     (Voter precincts / City council districts / Canvassed addresses) -- previously
      just the hairline border above separated them, with the next section's
      header sitting flush against it. Same ":not(.sidebar-section-last)"
      exclusion as the border-removal rule above, so the bottom-anchored
@@ -705,13 +708,13 @@
     max-width: calc(100vw - 32px);
     overflow: hidden;
     /* A bit more room than Leaflet's own default ~10px control-corner gap --
-       10px off the map's right edge (matching that default explicitly) and
+       10px off the map's left edge (matching that default explicitly) and
        extra clearance below, so this doesn't sit flush against the
-       attribution ("Leaflet | (c) OpenStreetMap contributors") credit line
-       that's also anchored in this same corner. Once dragged (see
-       setupLegendDrag()), this margin is zeroed out in favor of an explicit
-       position:fixed left/top instead. */
-    margin: 0 10px 16px 0 !important;
+       attribution ("Leaflet | (c) OpenStreetMap contributors") credit line,
+       which stays anchored at the bottom-RIGHT and so never actually shares
+       this corner. Once dragged (see setupLegendDrag()), this margin is
+       zeroed out in favor of an explicit position:fixed left/top instead. */
+    margin: 0 0 16px 10px !important;
   }
   .map-legend-title-bar {
     padding: 8px 12px;
@@ -1557,6 +1560,18 @@
         </div>
         <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
       </div>
+      <!-- Order here (Voter precincts / City council districts / Canvassed
+           addresses) deliberately matches the Layers menu's own Overlays
+           list order (Voter precincts / City council districts / Canvassed
+           addresses) -- see .sidebar-list-stack above -- so the two stay in
+           the same sequence at a glance. -->
+      <div class="sidebar-section" id="district-list-section" hidden>
+        <div class="sidebar-header">
+          <h2>City council districts</h2>
+          <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
+        </div>
+        <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
+      </div>
       <div class="sidebar-section" id="address-list-section">
         <div class="sidebar-header">
           <h2>Canvassed addresses</h2>
@@ -1564,18 +1579,6 @@
         </div>
         <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
         <div class="sidebar-footer" id="count-footer">&nbsp;</div>
-      </div>
-      <!-- Order here (Voter precincts / Canvassed addresses / City council districts)
-           deliberately matches the Layers menu's own Overlays list order
-           (Voter precincts / Canvassed addresses / City council districts) --
-           see .sidebar-list-stack above -- so the two stay in the same
-           sequence at a glance. -->
-      <div class="sidebar-section" id="district-list-section" hidden>
-        <div class="sidebar-header">
-          <h2>City council districts</h2>
-          <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
-        </div>
-        <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
       </div>
     </div>
     </div>
@@ -2272,6 +2275,13 @@
   // reload rather than silently doing it for them (a silent reload mid-edit
   // would blow away anything they haven't saved yet).
   var lastKnownIndexVersionTag = null; // ETag/Last-Modified captured right after boot, as a baseline to compare against
+  // A tag seen once that DIFFERS from the baseline, but not yet confirmed --
+  // see checkForNewVersion() below. This is what keeps a one-off CDN/ETag
+  // blip (GitHub Pages sits behind Fastly, and ETags can occasionally shift
+  // for reasons that have nothing to do with the file's actual content) from
+  // popping the "new version" prompt on its own; a REAL deploy's tag stays
+  // different on the very next check too, a transient blip usually doesn't.
+  var pendingNewVersionTag = null;
 
   function fetchIndexVersionTag() {
     // The cache-busting query param matters as much as `cache: "no-store"`
@@ -2299,9 +2309,20 @@
         lastKnownIndexVersionTag = tag; // first successful check just establishes the baseline to compare future checks against
         return;
       }
-      if (tag !== lastKnownIndexVersionTag) {
+      if (tag === lastKnownIndexVersionTag) {
+        pendingNewVersionTag = null; // back to normal -- whatever changed before was transient
+        return;
+      }
+      // The tag differs from the baseline. Don't surface the prompt on the
+      // very first sighting of a new tag -- GitHub Pages sits behind Fastly,
+      // and ETags can occasionally blip for reasons that have nothing to do
+      // with the file's actual content. Require the SAME new tag to show up
+      // on two checks in a row before treating it as a real deploy.
+      if (pendingNewVersionTag === tag) {
         updateAvailableVersionTag = tag;
         $("update-toast").hidden = false;
+      } else {
+        pendingNewVersionTag = tag; // first sighting -- wait for confirmation next check
       }
     });
   }
@@ -2748,8 +2769,8 @@
   function buildOverlaysChoices(container) {
     var choices = [
       { key: "precincts", label: "Voter precincts", tintClass: "layers-choice-row-precincts" },
-      { key: "canvassProgress", label: "Canvassed addresses", tintClass: "layers-choice-row-canvass" },
-      { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" }
+      { key: "districts", label: "City council districts", tintClass: "layers-choice-row-districts" },
+      { key: "canvassProgress", label: "Canvassed addresses", tintClass: "layers-choice-row-canvass" }
     ];
     // Only offered at all once a House Parties Sheet/Apps Script is actually
     // configured (see HOUSE_PARTIES_ENABLED) -- otherwise there's nothing
@@ -2883,11 +2904,11 @@
   }
 
   // ================== MAP LEGEND ==================
-  // A small reference key pinned to the map's own bottom-right corner --
+  // A small reference key pinned to the map's own bottom-left corner --
   // one section per overlay, using that overlay's own name from the
-  // Overlays list above (Voter precincts / Canvassed addresses / City
-  // council districts) so the two always read as the same three things.
-  // Built as a genuine Leaflet control (bottomright), same as the layers
+  // Overlays list above (Voter precincts / City council districts /
+  // Canvassed addresses) so the two always read as the same three things.
+  // Built as a genuine Leaflet control (bottomleft), same as the layers
   // menu above, rather than a plain absolutely-positioned div: that keeps
   // it correctly scoped to #map's own box (Leaflet appends it inside #map,
   // stacking cleanly with the attribution control already anchored there)
@@ -2904,7 +2925,7 @@
   // changes at all for the move.
   function addLegendControl() {
     var LegendControl = L.Control.extend({
-      options: { position: "bottomright" },
+      options: { position: "bottomleft" },
       onAdd: function () {
         var container = L.DomUtil.create("div", "leaflet-control map-legend");
         L.DomEvent.disableClickPropagation(container);
@@ -2924,16 +2945,16 @@
               '<div class="legend-row"><span class="legend-swatch" style="background:var(--precinct-completed)"></span><span class="legend-label">Completed</span><span class="legend-count" id="legend-count-completed">0</span></div>' +
             '</div>' +
           '</div>' +
-          '<div class="legend-section" id="legend-canvass-section">' +
-            '<div class="sidebar-header"><h2>Canvassed addresses</h2></div>' +
-            '<div class="status-legend">' +
-              '<div class="legend-row"><span class="legend-swatch" style="background:var(--walked-color)"></span><span class="legend-label">Canvassed</span></div>' +
-            '</div>' +
-          '</div>' +
           '<div class="legend-section" id="legend-district-section" hidden>' +
             '<div class="sidebar-header"><h2>City council districts</h2></div>' +
             '<div class="status-legend">' +
               '<div class="legend-row"><span class="legend-swatch legend-swatch-outline"></span><span class="legend-label">District outline</span></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="legend-section" id="legend-canvass-section">' +
+            '<div class="sidebar-header"><h2>Canvassed addresses</h2></div>' +
+            '<div class="status-legend">' +
+              '<div class="legend-row"><span class="legend-swatch" style="background:var(--walked-color)"></span><span class="legend-label">Canvassed</span></div>' +
             '</div>' +
           '</div>' +
           // Only built at all when a House Parties Sheet/Apps Script is
