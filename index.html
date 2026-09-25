@@ -848,6 +848,24 @@
   .layers-choice-row-houseparties { background: linear-gradient(180deg, var(--tint-houseparties), transparent 85%); }
   .layers-choice-row-yardsigns { background: linear-gradient(180deg, var(--tint-yardsigns), transparent 85%); }
 
+  /* House Parties/Yard Signs only -- a one-line status right under their
+     Overlays row showing the outcome of the most recent load attempt
+     (see renderOverlayLoadStatus() in the script below). Visible whether or
+     not the overlay's own checkbox is on, specifically so a missing-pins
+     report can be diagnosed without first having to turn the layer on.
+     Indented to roughly align under the row's own label text, not the
+     checkbox. */
+  .layers-choice-status {
+    font-size: 0.72rem;
+    color: var(--muted);
+    padding: 0 6px 4px 30px;
+    margin-top: -2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .layers-choice-status-fail { color: var(--danger); }
+
   /* Marks whichever Overlays row (precincts or districts -- canvassProgress
      is never clickable, see CLICKABLE_OVERLAYS) is the current clickable
      overlay, right in the Layers menu itself, so it's obvious at a glance
@@ -2762,6 +2780,36 @@
   }
 
   // ================== OVERLAYS (sidebar section) ==================
+  // Only House Parties/Yard Signs get a load-status line under their row
+  // (see buildOverlaysChoices() below and renderOverlayLoadStatus() just
+  // after it) -- they're the two overlays each fetched from their own,
+  // independently-flaky Apps Script backend on a poll timer; the others
+  // don't hit a network endpoint of their own outside the main boot fetch,
+  // so there's no separate "did THIS one's load succeed" question to answer
+  // for them.
+  var OVERLAY_LOAD_STATUS_EL_ID = {
+    houseParties: "houseparty-load-status",
+    yardSigns: "yardsign-load-status"
+  };
+
+  // Renders one overlay's load-status line: `state` is
+  // { ok: true|false, message: "one line summary", detail: "full error text or ''" }.
+  // `message` is what's actually shown (kept short so it doesn't wrap/get
+  // clipped); `detail` -- typically the raw error text from a failed fetch
+  // or the backend's own {ok:false, error: "..."} response -- is only ever
+  // in the title attribute, so hovering the status line is what surfaces
+  // the full diagnostic detail without cluttering the sidebar. Called after
+  // every load attempt, success or failure, from loadHouseParties()/
+  // loadYardSigns() below -- this is the actual answer to "why didn't this
+  // render," instead of an empty map and a guess.
+  function renderOverlayLoadStatus(key, state) {
+    var el = $(OVERLAY_LOAD_STATUS_EL_ID[key]);
+    if (!el) return;
+    el.textContent = state.message;
+    el.title = state.detail || "";
+    el.classList.toggle("layers-choice-status-fail", state.ok === false);
+  }
+
   // Builds the Overlays checkbox rows into the given container -- used once,
   // for the sidebar's own "Overlays" section (see the top of the sidebar
   // markup). This used to be built inside the Layers menu control below,
@@ -2807,6 +2855,15 @@
       // has nothing to select, so it's left as a non-interactive label.
       if (CLICKABLE_OVERLAYS.indexOf(ov.key) !== -1) {
         L.DomEvent.on(labelText, "click", function () { setCurrentClickableOverlay(ov.key); });
+      }
+      // House Parties/Yard Signs only -- see OVERLAY_LOAD_STATUS_EL_ID and
+      // renderOverlayLoadStatus() below for what fills this in and when.
+      // Fixed IDs (rather than storing the element some other way) since
+      // this row is only ever built once, at boot.
+      if (OVERLAY_LOAD_STATUS_EL_ID.hasOwnProperty(ov.key)) {
+        var statusEl = L.DomUtil.create("div", "layers-choice-status", container);
+        statusEl.id = OVERLAY_LOAD_STATUS_EL_ID[ov.key];
+        statusEl.textContent = "Loading…";
       }
     });
   }
@@ -4736,41 +4793,55 @@
   }
 
   // How soon to try again, just once, after a failed/unparseable poll --
-  // see loadHouseParties()'s own comment for why this happens at all. Well
-  // under HOUSE_PARTIES_POLL_MS so a one-off slow request self-heals in
-  // seconds rather than up to a full minute.
+  // this is mostly a safety net for an ordinary network hiccup now that
+  // the House Parties backend's doGet() no longer does any slow work of
+  // its own (geocoding moved to a background trigger -- see
+  // apps-script/HouseParties.gs's own top-of-file comment). Well under
+  // HOUSE_PARTIES_POLL_MS so a one-off failure self-heals in seconds rather
+  // than up to a full minute.
   var HOUSE_PARTIES_RETRY_MS = 8000;
 
   // Fetched independently of DEMO_MODE/the main apps-script/Code.gs
   // backend -- see HOUSE_PARTIES_ENABLED's own comment. A failure here
-  // (backend down, network hiccup) is swallowed rather than surfaced:
-  // whatever pins were already drawn from the last successful load just
-  // stay put instead of vanishing or blocking the rest of the map.
-  //
-  // A failure also includes a request that simply took too long: this
-  // sheet's doGet() geocodes any brand-new (or retry-cooldown-expired)
-  // address INLINE before responding, and Apps Script's own redirect-based
-  // delivery (the request bounces through a script.googleusercontent.com/
-  // macros/echo URL) has a real-world ceiling around 30 seconds -- past
-  // that, the browser gets a 404 on that echo URL instead of the actual
-  // JSON, even though the script itself keeps running server-side and
-  // still writes the newly-geocoded coordinates to the Geocode tab. So a
-  // slow request isn't really "failed," it's just late -- the very next
-  // poll normally succeeds fast since everything's cached by then. Rather
-  // than making the user wait out the rest of a full HOUSE_PARTIES_POLL_MS
-  // interval for that natural recovery, retry once after a short delay
-  // (isRetry guards against retrying forever if the backend is genuinely,
-  // persistently broken -- in that case this falls back to the normal poll
-  // cadence instead of hammering it every few seconds).
+  // (backend down, network hiccup, a since-revoked Apps Script
+  // authorization, etc.) never blocks or clears the map: whatever pins
+  // were already drawn from the last successful load just stay put. It
+  // DOES get surfaced, though -- see renderOverlayLoadStatus() and
+  // handleHousePartiesLoadFailure_() below -- as a one-line status under
+  // this overlay's row in the sidebar's Overlays section, specifically so
+  // "why didn't this render" has an actual answer to look at instead of
+  // just an empty map and a guess.
   function loadHouseParties(isRetry) {
     fetch(CONFIG.HOUSE_PARTIES_URL)
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res || !res.ok) { retryLoadHouseParties(isRetry); return; }
+        if (!res || !res.ok) {
+          handleHousePartiesLoadFailure_(isRetry, (res && res.error) || "Backend returned an unexpected response");
+          return;
+        }
         housePartiesData = res.houseParties || [];
         renderHouseParties();
+        renderOverlayLoadStatus("houseParties", {
+          ok: true,
+          message: "Updated " + new Date().toLocaleTimeString() + " · " + housePartiesData.length +
+            (housePartiesData.length === 1 ? " pin" : " pins"),
+          detail: ""
+        });
       })
-      .catch(function () { retryLoadHouseParties(isRetry); });
+      .catch(function (err) {
+        handleHousePartiesLoadFailure_(isRetry, (err && err.message) || String(err));
+      });
+  }
+
+  function handleHousePartiesLoadFailure_(isRetry, errorText) {
+    renderOverlayLoadStatus("houseParties", {
+      ok: false,
+      message: isRetry
+        ? "Couldn't load — will try again at next poll"
+        : "Couldn't load just now — retrying in " + (HOUSE_PARTIES_RETRY_MS / 1000) + "s",
+      detail: errorText
+    });
+    retryLoadHouseParties(isRetry);
   }
 
   function retryLoadHouseParties(isRetry) {
@@ -4893,27 +4964,44 @@
   }
 
   // Same short-retry-once reasoning as HOUSE_PARTIES_RETRY_MS above -- see
-  // loadHouseParties()'s comment for the full explanation of why a poll can
-  // be slow enough to 404 on Apps Script's own echo-redirect delivery.
+  // loadHouseParties()'s comment for the full explanation.
   var YARD_SIGNS_RETRY_MS = 8000;
 
   // Fetched independently of DEMO_MODE/the main apps-script/Code.gs backend
-  // and of House Parties -- see YARD_SIGNS_ENABLED's own comment. A failure
-  // here (backend down, network hiccup) is swallowed rather than surfaced:
-  // whatever pins were already drawn from the last successful load just
-  // stay put instead of vanishing or blocking the rest of the map. Also
-  // retries once shortly after a slow/failed poll rather than waiting out
-  // the rest of a full YARD_SIGNS_POLL_MS interval -- see
-  // loadHouseParties()'s comment for why.
+  // and of House Parties -- see YARD_SIGNS_ENABLED's own comment. Same
+  // status-surfacing and short-retry behavior as loadHouseParties() above --
+  // see its comment for the full reasoning.
   function loadYardSigns(isRetry) {
     fetch(CONFIG.YARD_SIGNS_URL)
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (!res || !res.ok) { retryLoadYardSigns(isRetry); return; }
+        if (!res || !res.ok) {
+          handleYardSignsLoadFailure_(isRetry, (res && res.error) || "Backend returned an unexpected response");
+          return;
+        }
         yardSignsData = res.yardSigns || [];
         renderYardSigns();
+        renderOverlayLoadStatus("yardSigns", {
+          ok: true,
+          message: "Updated " + new Date().toLocaleTimeString() + " · " + yardSignsData.length +
+            (yardSignsData.length === 1 ? " pin" : " pins"),
+          detail: ""
+        });
       })
-      .catch(function () { retryLoadYardSigns(isRetry); });
+      .catch(function (err) {
+        handleYardSignsLoadFailure_(isRetry, (err && err.message) || String(err));
+      });
+  }
+
+  function handleYardSignsLoadFailure_(isRetry, errorText) {
+    renderOverlayLoadStatus("yardSigns", {
+      ok: false,
+      message: isRetry
+        ? "Couldn't load — will try again at next poll"
+        : "Couldn't load just now — retrying in " + (YARD_SIGNS_RETRY_MS / 1000) + "s",
+      detail: errorText
+    });
+    retryLoadYardSigns(isRetry);
   }
 
   function retryLoadYardSigns(isRetry) {
