@@ -1228,6 +1228,10 @@
   /* ---------- yard sign map marker ---------- */
   .yardsign-marker svg { display: block; }
 
+  /* ---------- quick canvass panel ---------- */
+  #canvass-panel-text { margin-top: 4px; font-size: 0.85rem; color: var(--ink); }
+  #canvass-panel-meta { font-size: 0.72rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+
   .dialog-actions {
     display: flex;
     gap: 8px;
@@ -1737,6 +1741,20 @@
     </div>
   </div>
 
+  <!-- ============ QUICK CANVASS PANEL (floating; opened by picking an address
+       from the "Canvassed addresses" search list -- lets you mark ANY parcel
+       on the map as canvassed, across different precincts, without opening
+       each one's own precinct panel) ============ -->
+  <div class="precinct-panel" id="canvass-panel" hidden>
+    <h3>Canvassed addresses</h3>
+    <div id="canvass-panel-text">Click on individual addresses to mark as canvassed. Click Save to post your changes.</div>
+    <div id="canvass-panel-meta"></div>
+    <div class="dialog-actions">
+      <button class="btn" id="canvass-cancel" type="button">Close</button>
+      <button class="btn primary" id="canvass-save" type="button">Save</button>
+    </div>
+  </div>
+
   <!-- ============ SETTINGS PANEL (hideable; colors + default basemap) ============ -->
   <div class="settings-panel" id="settings-panel" hidden>
     <div class="settings-panel-header">
@@ -1963,9 +1981,36 @@
   var pendingStatus = null;       // unsaved precinct-status selection while the panel is open
   var pendingCompletedDate = "";  // unsaved "Completed" date while the panel is open
   var pendingWalked = {};         // address(lowercased) -> boolean -- unsaved swipe toggles this session
+  // Baseline values captured when the precinct panel opens (or right after a
+  // save), used only to tell whether anything has actually changed since --
+  // see precinctPanelIsDirty()/updatePrecinctSaveButtonState() below, which
+  // keep the Save button disabled until it has. (Named "saveBaseline*" --
+  // not "committed*" -- to avoid colliding with the existing
+  // committedPrecinctStatus(id) function below, which means something
+  // different: the last-SAVED status of ANY precinct, not this dirty-check.)
+  var saveBaselineStatus = null;
+  var saveBaselineCompletedDate = "";
+  var saveBaselineNotes = "";
   var walkArmed = false;          // true while the Walked checkbox is on (swipe-to-paint active)
   var swiping = false;
   var swipeTouchedThisStroke = {};
+
+  // ---- quick canvass panel state ("Canvassed addresses" search list -> click
+  // any parcel on the map, across different precincts, to mark it canvassed) ----
+  var quickCanvassActive = false;      // true while the quick-canvass panel is open
+  var quickCanvassAnchorLatLng = null; // the address it was opened for -- keeps the panel positioned nearby as the map pans/zooms
+  // Shares pendingWalked/toggleWalkedPending/currentWalked/committedWalked
+  // with the precinct panel's own Walked mode above -- the two modes are
+  // mutually exclusive (closeOtherMapPanels() closes one before the other
+  // opens), so there's never any ambiguity about which mode a pending toggle
+  // belongs to, and reusing the same map/functions means a parcel's color
+  // and any other canvasser's view of it work identically either way.
+
+  // Basemap to restore once neither Walked mode nor quick-canvass mode is
+  // still active -- both switch to Hybrid (satellite+labels) while active,
+  // since seeing the actual imagery matters more than whatever basemap was
+  // picked, and restore whatever was showing before once done.
+  var basemapBeforeCanvassMode = null;
 
   var PRECINCT_STATUSES = ["Not Yet Printed", "Printed", "Partially Walked", "Completed"];
   var DEFAULT_PRECINCT_STATUS = "Not Yet Printed";
@@ -2146,6 +2191,39 @@
     // their own separate change handling -- they just mirror whatever this
     // function just did. A no-op before addLayersControl() has built them.
     updateBasemapControlUI(name);
+  }
+
+  // Whichever of baseLayers is actually attached to the map right now --
+  // there's no separate "current basemap" variable, setBasemap() itself is
+  // the single source of truth (see its own comment above), so this just
+  // asks the map directly.
+  function currentBasemapName() {
+    var name = null;
+    Object.keys(baseLayers).forEach(function (key) {
+      if (map.hasLayer(baseLayers[key])) name = key;
+    });
+    return name;
+  }
+
+  // Both the precinct panel's Walked mode and the "Canvassed addresses"
+  // quick-canvass panel switch to Hybrid (satellite+labels) while active --
+  // seeing the actual imagery matters more here than whatever basemap the
+  // canvasser had picked. Guarded by basemapBeforeCanvassMode so entering
+  // one mode while the other is already active doesn't clobber the
+  // remembered basemap with "Hybrid" itself, and exiting only restores once
+  // BOTH modes are done with it.
+  function enterHybridCanvassView() {
+    if (basemapBeforeCanvassMode === null) {
+      basemapBeforeCanvassMode = currentBasemapName();
+      setBasemap("Hybrid");
+    }
+  }
+  function exitHybridCanvassViewIfIdle() {
+    if (walkArmed || quickCanvassActive) return;
+    if (basemapBeforeCanvassMode !== null) {
+      setBasemap(basemapBeforeCanvassMode);
+      basemapBeforeCanvassMode = null;
+    }
   }
 
   // ================== UTIL ==================
@@ -2478,6 +2556,18 @@
     updateSidebarSectionBorders();
 
     map.on("click", function () { deselectParcel(); });
+    // Fallback for quick-canvass mode when the click doesn't land on an
+    // interactive precinct/district shape at all -- e.g. both overlays
+    // unchecked (removed from the map entirely, see setOverlayOn()), or
+    // whichever of the two ISN'T currently "the active clickable overlay"
+    // (interactive: false, so its own click handler above never runs -- see
+    // updateClickableOverlayState()). The precinct/district layers' own
+    // click handlers already take over when quick-canvass mode is active
+    // AND one of them is interactive, via L.DomEvent.stopPropagation(), so
+    // this only ever fires for whichever of those two cases applies.
+    map.on("click", function (e) {
+      if (quickCanvassActive) quickCanvassMarkAtLatLng(e.latlng);
+    });
     // Address (parcel number) labels are plain DOM markers, not part of the
     // vector layer Leaflet already smoothly scales/repositions during a zoom
     // animation -- left alone, they'd sit at their old screen position and
@@ -2504,6 +2594,7 @@
     setupFloatingPanelDrag($("district-panel"));
     setupFloatingPanelDrag($("houseparty-panel"));
     setupFloatingPanelDrag($("yardsign-panel"));
+    setupFloatingPanelDrag($("canvass-panel"));
     setupSidebarToggle();
 
     // Independent of the main Promise.all() below (see the House Parties
@@ -3873,6 +3964,16 @@
         });
         precinctIndex[id] = { feature: feature, layer: layer, parcelKeys: [], labelMarker: labelMarker };
         layer.on("click", function (e) {
+          // Quick-canvass mode owns clicks on the map while its panel is
+          // open, same idea as walkArmed below -- take over before the
+          // normal select-a-precinct routing even runs (see the map-level
+          // fallback click handler in initMap() for the case where this
+          // layer isn't the currently interactive one at all).
+          if (quickCanvassActive) {
+            L.DomEvent.stopPropagation(e);
+            quickCanvassMarkAtLatLng(e.latlng);
+            return;
+          }
           // Only when Voter precincts is both on AND the current clickable
           // overlay (see setOverlayOn()/isOverlayClickActive()) -- with City
           // council districts also on and set as current instead, a click
@@ -4319,6 +4420,12 @@
         });
         districtIndex[id].labelMarker = labelMarker;
         layer.on("click", function (e) {
+          // Same quick-canvass takeover as precincts (see addPrecincts).
+          if (quickCanvassActive) {
+            L.DomEvent.stopPropagation(e);
+            quickCanvassMarkAtLatLng(e.latlng);
+            return;
+          }
           // Same click-routing rule as precincts (see addPrecincts) -- only
           // acts when City council districts is both on and currently the
           // clickable overlay.
@@ -4522,6 +4629,14 @@
         map.flyTo(b.getCenter(), targetZoom, { duration: 0.6 });
       }
     } catch (e) { /* ignore */ }
+
+    // Selecting an address from the search list (as opposed to some other
+    // future caller of selectParcel) is also the entry point into the
+    // "Canvassed addresses" quick-canvass panel -- a viewer has nothing to
+    // do there (they can't mark parcels canvassed any more than they can
+    // paint Walked in a precinct panel), so this stays a plain find-and-zoom
+    // for them, same as before.
+    if (opts.fromList && isEditor()) openQuickCanvassPanel(entry);
   }
 
   function groupBounds(entry) {
@@ -4542,22 +4657,23 @@
     });
   }
 
-  // Only one of the four floating map panels (precinct, district, house
-  // party, yard sign) is ever shown at once -- they can overlap on screen
-  // since each is positioned next to whatever it's about, and a leftover
-  // panel from an earlier click (e.g. a house party's info panel still open
-  // when a precinct gets selected) would otherwise linger alongside the new
-  // one. Precinct <-> district already deselect each other directly (see
-  // deselectDistrict()/deselectPrecinct(), called from selectPrecinct()/
-  // selectDistrict()); this covers the other combinations -- house party and
-  // yard sign markers don't go through a "select" wrapper, they just open
-  // their panel straight from the marker's click handler. exceptType is
-  // whichever panel is ABOUT to open, so that one is left alone.
+  // Only one of the five floating map panels (precinct, district, house
+  // party, yard sign, quick canvass) is ever shown at once -- they can
+  // overlap on screen since each is positioned next to whatever it's about,
+  // and a leftover panel from an earlier click (e.g. a house party's info
+  // panel still open when a precinct gets selected) would otherwise linger
+  // alongside the new one. Precinct <-> district already deselect each other
+  // directly (see deselectDistrict()/deselectPrecinct(), called from
+  // selectPrecinct()/selectDistrict()); this covers the other combinations --
+  // house party and yard sign markers don't go through a "select" wrapper,
+  // they just open their panel straight from the marker's click handler.
+  // exceptType is whichever panel is ABOUT to open, so that one is left alone.
   function closeOtherMapPanels(exceptType) {
     if (exceptType !== "precinct" && openPrecinctId) closePrecinctPanel(true, { keepSelectionState: true });
     if (exceptType !== "district" && openDistrictId) closeDistrictPanel({ keepSelectionState: true });
     if (exceptType !== "houseparty" && openHousePartyMarker) closeHousePartyPanel();
     if (exceptType !== "yardsign" && openYardSignMarker) closeYardSignPanel();
+    if (exceptType !== "canvass" && quickCanvassActive) closeQuickCanvassPanel(true);
   }
 
   // ================== PRECINCT PANEL ==================
@@ -4585,12 +4701,41 @@
     $("precinct-notes").value = (existing && existing.notes) || "";
     $("precinct-meta").textContent = existing && existing.updatedAt ? lastUpdatedText(existing) : "";
 
+    // Baseline for dirty-checking -- see precinctPanelIsDirty(). Captured
+    // fresh every time the panel opens so Save starts out disabled again for
+    // whichever precinct/values are showing now.
+    saveBaselineStatus = pendingStatus;
+    saveBaselineCompletedDate = pendingCompletedDate;
+    saveBaselineNotes = $("precinct-notes").value;
+
     updatePrecinctPanelTitle(id);
     updatePrecinctStatusButtons();
     applyPrecinctPanelRoleGating();
+    updatePrecinctSaveButtonState();
     $("precinct-panel").hidden = false;
     positionPrecinctPanel(id);
     map.on("moveend zoomend", repositionOpenPanel);
+  }
+
+  // True once the panel's status, completed date, notes, or any parcel's
+  // walked state differs from what was last committed (either when the
+  // panel opened, or right after the last successful save) -- Save stays
+  // disabled until there's actually something to save.
+  function precinctPanelIsDirty() {
+    if (Object.keys(pendingWalked).length) return true;
+    if (pendingStatus !== saveBaselineStatus) return true;
+    // Mirrors the Save handler's own completedDate logic below -- the field
+    // stays in the DOM (just hidden) when status isn't "Completed", so its
+    // raw value can't be compared directly without false positives once the
+    // status has been flipped away from Completed and back.
+    var completedDateNow = pendingStatus === "Completed" ? $("precinct-completed-date").value : "";
+    if (completedDateNow !== saveBaselineCompletedDate) return true;
+    if ($("precinct-notes").value.trim() !== saveBaselineNotes) return true;
+    return false;
+  }
+
+  function updatePrecinctSaveButtonState() {
+    $("precinct-save").disabled = !precinctPanelIsDirty();
   }
 
   function lastUpdatedText(entry) {
@@ -5238,6 +5383,7 @@
       if (!isEditor()) return;
       pendingStatus = btn.dataset.status;
       updatePrecinctStatusButtons();
+      updatePrecinctSaveButtonState();
       // Preview the chosen status immediately -- on the map, in its list
       // row's dot, and in the legend counts -- rather than waiting for Save.
       // (precinctStatusFor() only prefers pendingStatus for openPrecinctId,
@@ -5254,6 +5400,12 @@
     });
   });
 
+  // Notes/completed-date have no pending* variable of their own (the Save
+  // handler reads their live DOM value directly) -- so, unlike pendingStatus
+  // above, the only way to know they've changed is to listen for it here.
+  $("precinct-completed-date").addEventListener("input", updatePrecinctSaveButtonState);
+  $("precinct-notes").addEventListener("input", updatePrecinctSaveButtonState);
+
   $("precinct-walk-toggle").addEventListener("change", function () {
     // Defense in depth -- the checkbox is already disabled for a viewer
     // (see applyPrecinctPanelRoleGating()).
@@ -5264,7 +5416,9 @@
 
   function setWalkArmed(armed) {
     $("map").classList.toggle("walk-armed", armed);
-    if (!armed) {
+    if (armed) {
+      enterHybridCanvassView();
+    } else {
       // Dragging/tap are only ever disabled for the duration of a single
       // paint stroke that starts inside the open precinct (see
       // setupSwipeToWalk()), not map-wide just because Walked is checked --
@@ -5276,6 +5430,7 @@
       map.dragging.enable();
       if (map.tap) map.tap.enable();
       $("map").classList.remove("walk-paint-cursor");
+      exitHybridCanvassViewIfIdle();
     }
     // Arming/disarming changes precinctStyle()'s output (see colorSuppressed
     // above) for the open precinct -- restyle it immediately either way.
@@ -5334,6 +5489,11 @@
         });
       }
       pendingWalked = {};
+      // Whatever was just saved is the new baseline -- Save goes back to
+      // disabled until something changes again (see precinctPanelIsDirty()).
+      saveBaselineStatus = status;
+      saveBaselineCompletedDate = completedDate;
+      saveBaselineNotes = notes;
       if (walkArmed) {
         // Keep walking: a save mid-walking-session shouldn't close the
         // panel, fly the map back out, or uncheck Walked the way a normal
@@ -5352,7 +5512,10 @@
     } catch (e) {
       $("precinct-meta").textContent = "Could not save: " + (e.message || e);
     } finally {
-      saveBtn.disabled = false;
+      // Not an unconditional re-enable: a successful save has nothing left
+      // pending (goes back to disabled), while a failed one is still dirty
+      // (stays enabled so the user can just retry Save).
+      if (openPrecinctId) updatePrecinctSaveButtonState();
       saveBtn.textContent = "Save";
     }
   });
@@ -5362,6 +5525,7 @@
     if (e.key === "Escape" && openDistrictId) closeDistrictPanel({ zoomOut: true });
     if (e.key === "Escape" && openHousePartyMarker) closeHousePartyPanel();
     if (e.key === "Escape" && openYardSignMarker) closeYardSignPanel();
+    if (e.key === "Escape" && quickCanvassActive) closeQuickCanvassPanel(true);
   });
 
   // ================== SWIPE TO MARK WALKED ==================
@@ -5675,8 +5839,163 @@
     }
     restyleEntry(key);
     syncParcelVisibilityIfBelowThreshold(key);
-    updatePrecinctListRow(openPrecinctId);
+    // The key's own precinct, not openPrecinctId -- identical to openPrecinctId
+    // while painting inside an open precinct (paintAtPoint only ever touches
+    // that precinct's own parcels), but quickCanvassMarkAtLatLng() below can
+    // toggle a parcel in ANY precinct with no precinct panel open at all.
+    var entry = parcelIndex[key];
+    if (entry) updatePrecinctListRow(entry.precinctId);
+    if (openPrecinctId) updatePrecinctSaveButtonState();
+    if (quickCanvassActive) updateQuickCanvassCancelLabel();
   }
+
+  // ================== QUICK CANVASS PANEL ==================
+  // Opened from picking an address in the "Canvassed addresses" search list
+  // (see selectParcel()) -- unlike the precinct panel's Walked mode, this
+  // isn't scoped to one precinct: a click anywhere on the map marks whatever
+  // parcel is under it, in whichever precinct that happens to be. Shares
+  // pendingWalked/toggleWalkedPending with Walked mode (see the state
+  // comment near quickCanvassActive above).
+
+  // Mirrors paintAtPoint()'s turf.js hit-test, but isn't scoped to a single
+  // already-open precinct -- first finds whichever precinct (if any)
+  // contains the click, then that precinct's own parcel under it.
+  function quickCanvassMarkAtLatLng(latlng) {
+    if (!isEditor()) return; // defense in depth -- see the panel's own open-gating in selectParcel()
+    var pt = turf.point([latlng.lng, latlng.lat]);
+    var precinctId = null;
+    for (var pid in precinctIndex) {
+      if (!precinctIndex.hasOwnProperty(pid)) continue;
+      if (turf.booleanPointInPolygon(pt, precinctIndex[pid].feature)) { precinctId = pid; break; }
+    }
+    if (!precinctId) return;
+    var p = precinctIndex[precinctId];
+    for (var i = 0; i < p.parcelKeys.length; i++) {
+      var key = p.parcelKeys[i];
+      var entry = parcelIndex[key];
+      if (!entry) continue;
+      var hit = entry.features.some(function (f) { return turf.booleanPointInPolygon(pt, f); });
+      if (hit) {
+        toggleWalkedPending(key);
+        return;
+      }
+    }
+  }
+
+  // "Close" once there's nothing pending; once a click has marked something,
+  // the label doubles as a reminder that this quick panel only ever touches
+  // the Parcels sheet (see handleSaveWalked() in apps-script/Code.gs) -- if
+  // the precinct itself also needs a status/notes update, that still has to
+  // happen from its own precinct panel.
+  function updateQuickCanvassCancelLabel() {
+    $("canvass-cancel").textContent = Object.keys(pendingWalked).length
+      ? "Cancel (Make this change on the precinct panel as well)"
+      : "Close";
+  }
+
+  function openQuickCanvassPanel(entry) {
+    var alreadyActive = quickCanvassActive;
+    closeOtherMapPanels("canvass");
+    quickCanvassActive = true;
+    quickCanvassAnchorLatLng = groupBounds(entry).getCenter();
+    enterHybridCanvassView();
+    $("canvass-panel-meta").textContent = "";
+    updateQuickCanvassCancelLabel();
+    $("canvass-panel").hidden = false;
+    positionCanvassPanel();
+    // Only register once -- selecting a further address while the panel is
+    // already open just moves the same panel/session, it doesn't re-open it.
+    if (!alreadyActive) map.on("moveend zoomend", repositionOpenCanvassPanel);
+  }
+
+  function closeQuickCanvassPanel(discard) {
+    if (!quickCanvassActive) return;
+    if (discard && Object.keys(pendingWalked).length) {
+      var keys = Object.keys(pendingWalked);
+      pendingWalked = {};
+      keys.forEach(function (key) {
+        restyleEntry(key);
+        var entry = parcelIndex[key];
+        if (entry) updatePrecinctListRow(entry.precinctId);
+      });
+      renderPrecinctLegend();
+      buildAddressList($("search-input").value);
+    }
+    quickCanvassActive = false;
+    quickCanvassAnchorLatLng = null;
+    map.off("moveend zoomend", repositionOpenCanvassPanel);
+    $("canvass-panel").hidden = true;
+    exitHybridCanvassViewIfIdle();
+  }
+
+  function positionCanvassPanel() {
+    if (!quickCanvassAnchorLatLng) return;
+    positionPanelNearBounds($("canvass-panel"), L.latLngBounds(quickCanvassAnchorLatLng, quickCanvassAnchorLatLng));
+  }
+
+  function repositionOpenCanvassPanel() {
+    if (quickCanvassActive && !$("canvass-panel").dataset.dragging) positionCanvassPanel();
+  }
+
+  $("canvass-cancel").addEventListener("click", function () { closeQuickCanvassPanel(true); });
+
+  $("canvass-save").addEventListener("click", async function () {
+    if (!isEditor()) return;
+    var walkedChanges = Object.keys(pendingWalked).map(function (key) {
+      return { key: key, address: parcelIndex[key].addressExact, walked: pendingWalked[key] };
+    });
+    if (!walkedChanges.length) return; // Save has nothing to do yet
+
+    var saveBtn = this;
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      var nowIso = new Date().toISOString();
+      if (DEMO_MODE) {
+        walkedChanges.forEach(function (c) {
+          parcelWalkedData[c.key] = { walked: c.walked, updatedAt: nowIso, updatedBy: currentUser.displayName };
+        });
+      } else {
+        // A separate action from the precinct panel's own saveState -- this
+        // one only ever writes the Parcels sheet (see handleSaveWalked() in
+        // apps-script/Code.gs), never a precinct's own status/notes row,
+        // since a single quick-canvass session can touch parcels across
+        // many different precincts at once.
+        var res = await apiPost({
+          action: "saveWalked",
+          walked: walkedChanges.map(function (c) { return { address: c.address, walked: c.walked }; }),
+          username: currentUser.username
+        });
+        if (!res || !res.ok) throw new Error((res && res.error) || "Save failed");
+        walkedChanges.forEach(function (c) {
+          parcelWalkedData[c.key] = { walked: c.walked, updatedAt: res.updatedAt || nowIso, updatedBy: currentUser.displayName };
+        });
+      }
+      pendingWalked = {};
+      // Refresh every precinct touched this session (possibly several,
+      // unlike the precinct panel's own single-id save) -- their list rows,
+      // map fill, and the legend counts all need to catch up.
+      var touchedPrecinctIds = {};
+      walkedChanges.forEach(function (c) {
+        var entry = parcelIndex[c.key];
+        if (entry) touchedPrecinctIds[entry.precinctId] = true;
+      });
+      Object.keys(touchedPrecinctIds).forEach(function (pid) {
+        restylePrecinct(pid);
+        updatePrecinctListRow(pid);
+      });
+      renderPrecinctLegend();
+      buildPrecinctList($("precinct-search-input").value);
+      buildAddressList($("search-input").value);
+      updateQuickCanvassCancelLabel();
+      $("canvass-panel-meta").textContent = "";
+    } catch (e) {
+      $("canvass-panel-meta").textContent = "Could not save: " + (e.message || e);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+    }
+  });
 
   // ================== SETTINGS PANEL ==================
   // A hideable panel (the gear icon in the topbar) that lets an admin
