@@ -293,19 +293,24 @@
      after the url are the cursor's hotspot -- the bristle tip, roughly
      where paint would actually land -- with "crosshair" kept as the
      fallback for a browser that can't load the custom image.
-     Also requires "walk-paint-cursor" (toggled by a pointermove listener in
-     setupSwipeToWalk() based on isPointInsideOpenPrecinct()) -- without it
-     the brush would show over the whole map while Walked is checked, even
-     outside the precinct where painting isn't possible and normal map
-     dragging still works. */
-  #map.walk-armed.walk-paint-cursor {
+     Also requires "walk-paint-cursor" -- toggled by a pointermove listener in
+     setupSwipeToWalk() based on isPointInsideOpenPrecinct() while Walked is
+     checked, or on findParcelKeyAtLatLng() (any parcel, any precinct) while
+     the quick-canvass panel ("quick-canvass-active", see openQuickCanvassPanel/
+     closeQuickCanvassPanel) is open -- without it the brush would show over
+     the whole map any time either mode is active, even where painting isn't
+     actually possible (outside the precinct for Walked; off any parcel at
+     all for quick-canvass) and normal map dragging still works. */
+  #map.walk-armed.walk-paint-cursor,
+  #map.quick-canvass-active.walk-paint-cursor {
     cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNyAxNGMtMS42NiAwLTMgMS4zNC0zIDMgMCAxLjMxLTEuMTYgMi0yIDIgLjkyIDEuMjIgMi40OSAyIDQgMiAyLjIxIDAgNC0xLjc5IDQtNCAwLTEuNjYtMS4zNC0zLTMtM3oiIGZpbGw9IiNFMDYyMkIiIHN0cm9rZT0iIzFDMkIzOCIgc3Ryb2tlLXdpZHRoPSIwLjYiLz48cGF0aCBkPSJNMjAuNzEgNC42M2wtMS4zNC0xLjM0YTEgMSAwIDAgMC0xLjQxIDBMOSAxMi4yNSAxMS43NSAxNWw4Ljk2LTguOTZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxeiIgZmlsbD0iIzhGQTNBRSIgc3Ryb2tlPSIjMUMyQjM4IiBzdHJva2Utd2lkdGg9IjAuNiIvPjwvc3ZnPg==") 4 20, crosshair;
   }
   /* Leaflet adds its own "leaflet-interactive" class (cursor: pointer) to
      whichever canvas/path is under the mouse while hovering an interactive
      parcel or precinct shape -- which is most of the map -- and that would
      otherwise beat the brush cursor above. */
-  #map.walk-armed.walk-paint-cursor .leaflet-interactive {
+  #map.walk-armed.walk-paint-cursor .leaflet-interactive,
+  #map.quick-canvass-active.walk-paint-cursor .leaflet-interactive {
     cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNyAxNGMtMS42NiAwLTMgMS4zNC0zIDMgMCAxLjMxLTEuMTYgMi0yIDIgLjkyIDEuMjIgMi40OSAyIDQgMiAyLjIxIDAgNC0xLjc5IDQtNCAwLTEuNjYtMS4zNC0zLTMtM3oiIGZpbGw9IiNFMDYyMkIiIHN0cm9rZT0iIzFDMkIzOCIgc3Ryb2tlLXdpZHRoPSIwLjYiLz48cGF0aCBkPSJNMjAuNzEgNC42M2wtMS4zNC0xLjM0YTEgMSAwIDAgMC0xLjQxIDBMOSAxMi4yNSAxMS43NSAxNWw4Ljk2LTguOTZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxeiIgZmlsbD0iIzhGQTNBRSIgc3Ryb2tlPSIjMUMyQjM4IiBzdHJva2Utd2lkdGg9IjAuNiIvPjwvc3ZnPg==") 4 20, crosshair !important;
   }
 
@@ -1746,7 +1751,7 @@
        on the map as canvassed, across different precincts, without opening
        each one's own precinct panel) ============ -->
   <div class="precinct-panel" id="canvass-panel" hidden>
-    <h3>Canvassed addresses</h3>
+    <h3>Mark canvassed addresses</h3>
     <div id="canvass-panel-text">Click on individual addresses to mark as canvassed. Click Save to post your changes.</div>
     <div id="canvass-panel-meta"></div>
     <div class="dialog-actions">
@@ -1999,6 +2004,19 @@
   // any parcel on the map, across different precincts, to mark it canvassed) ----
   var quickCanvassActive = false;      // true while the quick-canvass panel is open
   var quickCanvassAnchorLatLng = null; // the address it was opened for -- keeps the panel positioned nearby as the map pans/zooms
+  // Once the user drags the panel (see setupFloatingPanelDrag's onDragEnd
+  // callback below), it stays wherever they put it for the rest of this
+  // quick-canvass session -- selecting another address, panning/zooming the
+  // map, or marking more parcels no longer snaps it back to the anchor
+  // address. Reset back to false each time a fresh session starts.
+  var canvassPanelManuallyPositioned = false;
+  // Coalesces the quick-canvass hover-cursor hit-test (see
+  // scheduleQuickCanvassCursorUpdate()) to at most once per animation frame
+  // -- unlike isPointInsideOpenPrecinct()'s single-polygon test for Walked
+  // mode, this one scans every precinct (then a parcel within it), which is
+  // real work to repeat on every single pointermove event a fast mouse move
+  // can fire.
+  var quickCanvassCursorRAFPending = false;
   // Shares pendingWalked/toggleWalkedPending/currentWalked/committedWalked
   // with the precinct panel's own Walked mode above -- the two modes are
   // mutually exclusive (closeOtherMapPanels() closes one before the other
@@ -2594,7 +2612,7 @@
     setupFloatingPanelDrag($("district-panel"));
     setupFloatingPanelDrag($("houseparty-panel"));
     setupFloatingPanelDrag($("yardsign-panel"));
-    setupFloatingPanelDrag($("canvass-panel"));
+    setupFloatingPanelDrag($("canvass-panel"), function () { canvassPanelManuallyPositioned = true; });
     setupSidebarToggle();
 
     // Independent of the main Promise.all() below (see the House Parties
@@ -3487,6 +3505,22 @@
   // radio buttons' own change handler below, which sets the variable without
   // going through updateClickableOverlayState().
   function updateLayersMenuClickableOutline() {
+    var canvassRow = document.querySelector(".layers-choice-row-canvass");
+    // While the quick-canvass panel is open, a map click marks a parcel, not
+    // select-and-zoom a precinct/district -- show "Canvassed addresses" as
+    // the selected/outlined overlay instead, without touching
+    // currentClickableOverlay itself (so Voter precincts/City council
+    // districts' own choice is exactly as the user left it once this mode
+    // ends -- see closeQuickCanvassPanel(), which just calls this again).
+    if (quickCanvassActive) {
+      if (canvassRow) canvassRow.classList.add("layers-choice-row-current-clickable");
+      CLICKABLE_OVERLAYS.forEach(function (key) {
+        var row = document.querySelector(".layers-choice-row-" + key);
+        if (row) row.classList.remove("layers-choice-row-current-clickable");
+      });
+      return;
+    }
+    if (canvassRow) canvassRow.classList.remove("layers-choice-row-current-clickable");
     CLICKABLE_OVERLAYS.forEach(function (key) {
       var row = document.querySelector(".layers-choice-row-" + key);
       if (row) row.classList.toggle("layers-choice-row-current-clickable", key === currentClickableOverlay);
@@ -5547,6 +5581,24 @@
     return turf.booleanPointInPolygon(pt, p.feature);
   }
 
+  // Same idea as isPointInsideOpenPrecinct() above, but for the quick-canvass
+  // panel: the paintbrush cursor shows whenever the pointer is over ANY
+  // parcel, not just inside one already-open precinct's boundary (see
+  // findParcelKeyAtLatLng()). Throttled to one hit-test per animation frame
+  // via quickCanvassCursorRAFPending -- see its own comment.
+  function scheduleQuickCanvassCursorUpdate(clientX, clientY) {
+    if (quickCanvassCursorRAFPending) return;
+    quickCanvassCursorRAFPending = true;
+    requestAnimationFrame(function () {
+      quickCanvassCursorRAFPending = false;
+      if (!quickCanvassActive) return;
+      var mapRect = $("map").getBoundingClientRect();
+      var containerPoint = L.point(clientX - mapRect.left, clientY - mapRect.top);
+      var latlng = map.containerPointToLatLng(containerPoint);
+      $("map").classList.toggle("walk-paint-cursor", !!findParcelKeyAtLatLng(latlng));
+    });
+  }
+
   function setupSwipeToWalk() {
     var mapEl = $("map");
     // Tracks whether THIS stroke is the one that disabled dragging/tap (as
@@ -5586,6 +5638,10 @@
       // where painting is actually possible.
       if (walkArmed && openPrecinctId) {
         mapEl.classList.toggle("walk-paint-cursor", isPointInsideOpenPrecinct(e.clientX, e.clientY));
+      } else if (quickCanvassActive) {
+        // Same cursor, but scoped to "any parcel" instead of "inside this
+        // one open precinct" -- see scheduleQuickCanvassCursorUpdate().
+        scheduleQuickCanvassCursorUpdate(e.clientX, e.clientY);
       }
       if (!swiping) return;
       paintAtPoint(e.clientX, e.clientY);
@@ -5769,7 +5825,7 @@
   // and making it look like it "jumped" out from under the cursor. Marking
   // the panel as dragging (via a data attribute those two functions check)
   // suppresses that auto-reposition for as long as the drag is in progress.
-  function setupFloatingPanelDrag(panel) {
+  function setupFloatingPanelDrag(panel, onDragEnd) {
     var handle = panel.querySelector("h3");
     var drag = null; // { startX, startY, startLeft, startTop } while dragging, else null
     handle.addEventListener("pointerdown", function (e) {
@@ -5803,6 +5859,7 @@
       drag = null;
       delete panel.dataset.dragging;
       handle.classList.remove("floating-panel-dragging");
+      if (onDragEnd) onDragEnd();
     }
     window.addEventListener("pointerup", endDrag);
     window.addEventListener("pointercancel", endDrag);
@@ -5846,7 +5903,7 @@
     var entry = parcelIndex[key];
     if (entry) updatePrecinctListRow(entry.precinctId);
     if (openPrecinctId) updatePrecinctSaveButtonState();
-    if (quickCanvassActive) updateQuickCanvassCancelLabel();
+    if (quickCanvassActive) updateQuickCanvassPendingUI();
   }
 
   // ================== QUICK CANVASS PANEL ==================
@@ -5859,48 +5916,70 @@
 
   // Mirrors paintAtPoint()'s turf.js hit-test, but isn't scoped to a single
   // already-open precinct -- first finds whichever precinct (if any)
-  // contains the click, then that precinct's own parcel under it.
-  function quickCanvassMarkAtLatLng(latlng) {
-    if (!isEditor()) return; // defense in depth -- see the panel's own open-gating in selectParcel()
+  // contains the point, then that precinct's own parcel under it. Read-only
+  // (just answers "which parcel, if any" without changing anything), so it's
+  // shared by both the click handler (quickCanvassMarkAtLatLng) and the
+  // hover-cursor handler (setupSwipeToWalk's pointermove) below.
+  function findParcelKeyAtLatLng(latlng) {
     var pt = turf.point([latlng.lng, latlng.lat]);
     var precinctId = null;
     for (var pid in precinctIndex) {
       if (!precinctIndex.hasOwnProperty(pid)) continue;
       if (turf.booleanPointInPolygon(pt, precinctIndex[pid].feature)) { precinctId = pid; break; }
     }
-    if (!precinctId) return;
+    if (!precinctId) return null;
     var p = precinctIndex[precinctId];
     for (var i = 0; i < p.parcelKeys.length; i++) {
       var key = p.parcelKeys[i];
       var entry = parcelIndex[key];
       if (!entry) continue;
       var hit = entry.features.some(function (f) { return turf.booleanPointInPolygon(pt, f); });
-      if (hit) {
-        toggleWalkedPending(key);
-        return;
-      }
+      if (hit) return key;
     }
+    return null;
   }
 
-  // "Close" once there's nothing pending; once a click has marked something,
-  // the label doubles as a reminder that this quick panel only ever touches
-  // the Parcels sheet (see handleSaveWalked() in apps-script/Code.gs) -- if
-  // the precinct itself also needs a status/notes update, that still has to
-  // happen from its own precinct panel.
-  function updateQuickCanvassCancelLabel() {
-    $("canvass-cancel").textContent = Object.keys(pendingWalked).length
-      ? "Cancel (Make this change on the precinct panel as well)"
-      : "Close";
+  function quickCanvassMarkAtLatLng(latlng) {
+    if (!isEditor()) return; // defense in depth -- see the panel's own open-gating in selectParcel()
+    var key = findParcelKeyAtLatLng(latlng);
+    if (key) toggleWalkedPending(key);
+  }
+
+  // Cancel reads "Close" once there's nothing pending, or plain "Cancel"
+  // once a click has marked something still unsaved. Save stays disabled
+  // until there's actually something pending to post, same idea as the
+  // precinct panel's own updatePrecinctSaveButtonState().
+  function updateQuickCanvassPendingUI() {
+    var hasPending = Object.keys(pendingWalked).length > 0;
+    $("canvass-cancel").textContent = hasPending ? "Cancel" : "Close";
+    $("canvass-save").disabled = !hasPending;
+  }
+
+  // While this panel is open, its overlay row ("Canvassed addresses") shows
+  // as the selected/outlined one in the sidebar's Overlays section instead
+  // of whichever of Voter precincts/City council districts
+  // currentClickableOverlay points to -- reflects that a map click right now
+  // marks a parcel, not select-and-zoom a precinct/district. Doesn't touch
+  // currentClickableOverlay itself, so the ordinary choice underneath is
+  // exactly as the user left it once this mode ends (see
+  // updateLayersMenuClickableOutline(), which this delegates to and which
+  // checks quickCanvassActive itself so it stays correct even if something
+  // else calls it while this panel happens to be open).
+  function updateQuickCanvassOverlayOutline() {
+    updateLayersMenuClickableOutline();
   }
 
   function openQuickCanvassPanel(entry) {
     var alreadyActive = quickCanvassActive;
     closeOtherMapPanels("canvass");
     quickCanvassActive = true;
+    if (!alreadyActive) canvassPanelManuallyPositioned = false;
     quickCanvassAnchorLatLng = groupBounds(entry).getCenter();
     enterHybridCanvassView();
+    $("map").classList.add("quick-canvass-active");
+    updateQuickCanvassOverlayOutline();
     $("canvass-panel-meta").textContent = "";
-    updateQuickCanvassCancelLabel();
+    updateQuickCanvassPendingUI();
     $("canvass-panel").hidden = false;
     positionCanvassPanel();
     // Only register once -- selecting a further address while the panel is
@@ -5923,13 +6002,20 @@
     }
     quickCanvassActive = false;
     quickCanvassAnchorLatLng = null;
+    canvassPanelManuallyPositioned = false;
     map.off("moveend zoomend", repositionOpenCanvassPanel);
     $("canvass-panel").hidden = true;
+    $("map").classList.remove("quick-canvass-active", "walk-paint-cursor");
+    updateQuickCanvassOverlayOutline();
     exitHybridCanvassViewIfIdle();
   }
 
+  // Skips repositioning once the user has manually dragged the panel (see
+  // canvassPanelManuallyPositioned/setupFloatingPanelDrag's onDragEnd
+  // callback) -- it stays right where they put it for the rest of this
+  // session instead of snapping back to the searched address.
   function positionCanvassPanel() {
-    if (!quickCanvassAnchorLatLng) return;
+    if (!quickCanvassAnchorLatLng || canvassPanelManuallyPositioned) return;
     positionPanelNearBounds($("canvass-panel"), L.latLngBounds(quickCanvassAnchorLatLng, quickCanvassAnchorLatLng));
   }
 
@@ -5987,12 +6073,16 @@
       renderPrecinctLegend();
       buildPrecinctList($("precinct-search-input").value);
       buildAddressList($("search-input").value);
-      updateQuickCanvassCancelLabel();
+      updateQuickCanvassPendingUI();
       $("canvass-panel-meta").textContent = "";
     } catch (e) {
       $("canvass-panel-meta").textContent = "Could not save: " + (e.message || e);
     } finally {
-      saveBtn.disabled = false;
+      // Not an unconditional re-enable -- same reasoning as the precinct
+      // panel's own Save handler: a successful save has nothing left
+      // pending (goes back to disabled), while a failed one is still
+      // dirty (stays enabled so the user can just retry).
+      if (quickCanvassActive) updateQuickCanvassPendingUI();
       saveBtn.textContent = "Save";
     }
   });
