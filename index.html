@@ -2165,6 +2165,13 @@
   var NOT_WALKED_PARCEL_TRANSPARENT = DEFAULT_SETTINGS.colors.notWalkedParcelTransparent;
   var SELECTED_BORDER_HEX = DEFAULT_SETTINGS.colors.selectedBorder;
   var UNSELECTED_OUTLINE_HEX = DEFAULT_SETTINGS.colors.unselectedOutline;
+  // Fixed (not a Settings-panel color, unlike the ones above) -- the single
+  // parcel selected from the Canvassed addresses list/search gets a plain
+  // yellow outline regardless of its walked/not-walked state, so it stands
+  // out as "this is the one you searched for" at a glance rather than
+  // blending in with its own state color (see styleForKey()'s isSelected
+  // branch, which used to just reuse that state color for the outline too).
+  var SELECTED_PARCEL_OUTLINE_HEX = "#ffd500";
   var PRECINCT_FILL_OPACITY = DEFAULT_SETTINGS.precinctFillOpacity;
   var PRECINCT_STATUS_COLOR_HEX = {
     "Not Yet Printed": DEFAULT_SETTINGS.colors.notYetPrinted,
@@ -3903,15 +3910,15 @@
       // the expensive part of drawing this layer on lower-powered devices,
       // and the fill alone is enough to read the parcels everywhere else.
       stroke: isSelected || inSelectedPrecinct,
-      // The selected (address-search) outline matches that parcel's own
-      // walked/not-walked color rather than a fixed color, so it reads as
-      // "this parcel, and here's its state" together.
-      color: isSelected ? stateColor : UNSELECTED_OUTLINE_HEX,
+      // The selected (address-search) outline is a fixed yellow, so it
+      // stands out clearly no matter that parcel's own walked/not-walked
+      // fill color.
+      color: isSelected ? SELECTED_PARCEL_OUTLINE_HEX : UNSELECTED_OUTLINE_HEX,
       // Weight 1 / opacity 0.6 (the original values here) turned out to
       // blend into the precinct fill and the parcels' own low-opacity fill
       // closely enough that the outline was easy to miss entirely rather
       // than just subtle -- bumped both so it reads clearly at a glance.
-      weight: isSelected ? 3 : (inSelectedPrecinct ? 1.5 : 0),
+      weight: isSelected ? 4 : (inSelectedPrecinct ? 1.5 : 0),
       opacity: isSelected ? 1 : (inSelectedPrecinct ? 0.9 : 0.6),
       fillColor: stateColor,
       fillOpacity: stateTransparent ? 0 : (walked ? 0.6 : (isSelected ? 0.3 : 0.12))
