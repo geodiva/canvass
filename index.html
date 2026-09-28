@@ -2037,7 +2037,7 @@
   // ---- quick canvass panel state ("Canvassed addresses" search list -> click
   // any parcel on the map, across different precincts, to mark it canvassed) ----
   var quickCanvassActive = false;      // true while the quick-canvass panel is open
-  var quickCanvassAnchorLatLng = null; // the address it was opened for -- keeps the panel positioned nearby as the map pans/zooms
+  var quickCanvassAnchorLatLng = null; // non-null while the panel is open; just a gate for positionCanvassPanel() now that it pins to the map's right edge instead of hugging the searched address
   // Once the user drags the panel (see setupFloatingPanelDrag's onDragEnd
   // callback below), it stays wherever they put it for the rest of this
   // quick-canvass session -- selecting another address, panning/zooming the
@@ -3576,6 +3576,22 @@
   function setCurrentClickableOverlay(key) {
     if (!overlaysOn[key] || currentClickableOverlay === key) return;
     currentClickableOverlay = key;
+    // Clicking an overlay's own name in the sidebar's Overlays section (see
+    // buildOverlaysChoices' labelText click handler) is how this actually
+    // gets called day to day -- and while the "Mark canvassed addresses"
+    // panel is open, every map click is claimed by quick-canvass mode
+    // regardless of currentClickableOverlay (see its interception in the
+    // precinct/district layers' click handlers and the map-level click
+    // fallback). So without this, choosing "Voter precincts" here while
+    // that panel was still open silently did nothing: the very next click
+    // on a precinct just tried to mark a parcel instead of opening its
+    // panel, with no visible reason why. Explicitly picking a different
+    // clickable overlay is a clear signal the user is done marking
+    // addresses and wants clicks to select precincts/districts again, so
+    // end quick-canvass mode here too -- same discard-pending behavior as
+    // every other way of leaving it (see closeOtherMapPanels()'s own
+    // "canvass" branch).
+    if (quickCanvassActive) closeQuickCanvassPanel(true);
     updateClickableOverlayState();
   }
 
@@ -3591,6 +3607,21 @@
   $("clickable-overlay-choices").addEventListener("change", function (e) {
     if (e.target && e.target.name === "a4m-clickable-overlay") {
       currentClickableOverlay = e.target.value;
+      // While the "Mark canvassed addresses" panel is open, EVERY map click
+      // is claimed by quick-canvass mode (see its click-interception in the
+      // precinct/district layers' own handlers and the map-level fallback,
+      // both of which check quickCanvassActive before anything else) --
+      // regardless of which overlay is "current." So picking Voter
+      // precincts/City council districts here while that panel is still
+      // open used to do nothing visible: clicking a precinct right
+      // afterwards still just tried to mark a parcel, and its info panel
+      // never opened, with no indication why. Explicitly choosing a
+      // different clickable overlay is a clear signal the user is done
+      // marking addresses and wants clicks to select precincts/districts
+      // again, so end quick-canvass mode here too -- same discard-pending
+      // behavior as every other way of leaving it (see
+      // closeOtherMapPanels()'s own "canvass" branch).
+      if (quickCanvassActive) closeQuickCanvassPanel(true);
       applyClickableInteractivity();
       updateLayersMenuClickableOutline();
     }
@@ -6123,13 +6154,32 @@
     exitHybridCanvassViewIfIdle();
   }
 
-  // Skips repositioning once the user has manually dragged the panel (see
-  // canvassPanelManuallyPositioned/setupFloatingPanelDrag's onDragEnd
-  // callback) -- it stays right where they put it for the rest of this
-  // session instead of snapping back to the searched address.
+  // Unlike the precinct/district/house-party/yard-sign panels (which all
+  // hug whatever shape/pin was just selected, wherever that happens to be
+  // on screen -- see positionPanelNearBounds()), this one defaults to a
+  // fixed spot: pinned to the right edge of the map, vertically centered
+  // (explicit request) -- regardless of where the searched address actually
+  // sits. That keeps it out of the way of the parcel you're about to click,
+  // in the same place every time, rather than jumping to a different side
+  // depending on the address. Skips repositioning once the user has
+  // manually dragged the panel (see canvassPanelManuallyPositioned/
+  // setupFloatingPanelDrag's onDragEnd callback) -- it stays right where
+  // they put it for the rest of this session instead of snapping back.
   function positionCanvassPanel() {
     if (!quickCanvassAnchorLatLng || canvassPanelManuallyPositioned) return;
-    positionPanelNearBounds($("canvass-panel"), L.latLngBounds(quickCanvassAnchorLatLng, quickCanvassAnchorLatLng));
+    var panel = $("canvass-panel");
+    var mapRect = $("map").getBoundingClientRect();
+    var pw = panel.offsetWidth || 300;
+    var ph = panel.offsetHeight || 320;
+    var gap = 14;
+    var minX = 8, minY = 8;
+    var maxX = window.innerWidth - pw - 8;
+    var maxY = window.innerHeight - ph - 8;
+    var x = mapRect.right - gap - pw;
+    var y = mapRect.top + (mapRect.height - ph) / 2;
+    var off = viewportToLayoutOffset();
+    panel.style.left = (Math.max(minX, Math.min(x, maxX)) - off.x) + "px";
+    panel.style.top = (Math.max(minY, Math.min(y, maxY)) - off.y) + "px";
   }
 
   function repositionOpenCanvassPanel() {
