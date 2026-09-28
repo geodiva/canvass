@@ -275,6 +275,16 @@
     pointer-events: none;
   }
   #zoom-level-indicator[hidden] { display: none; }
+  /* touch-action applies for the whole time Walked is checked (not just
+     inside the precinct) so a touch-drag that starts outside the precinct's
+     boundary and wanders in isn't eaten by the browser's own touch
+     scrolling before our pointer handlers see it -- see setupSwipeToWalk()
+     for why dragging itself is no longer disabled map-wide just because
+     Walked is checked (only for the duration of a stroke that starts inside
+     the precinct). */
+  #map.walk-armed {
+    touch-action: none;
+  }
   /* Swiping over parcels to mark them walked is a "painting" motion, so
      walk mode swaps the pointer for a small paintbrush glyph (a self-
      contained SVG data URI -- cursor images can't pick up the page's own
@@ -282,16 +292,20 @@
      accent/muted palette) instead of a generic crosshair. The two numbers
      after the url are the cursor's hotspot -- the bristle tip, roughly
      where paint would actually land -- with "crosshair" kept as the
-     fallback for a browser that can't load the custom image. */
-  #map.walk-armed {
+     fallback for a browser that can't load the custom image.
+     Also requires "walk-paint-cursor" (toggled by a pointermove listener in
+     setupSwipeToWalk() based on isPointInsideOpenPrecinct()) -- without it
+     the brush would show over the whole map while Walked is checked, even
+     outside the precinct where painting isn't possible and normal map
+     dragging still works. */
+  #map.walk-armed.walk-paint-cursor {
     cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNyAxNGMtMS42NiAwLTMgMS4zNC0zIDMgMCAxLjMxLTEuMTYgMi0yIDIgLjkyIDEuMjIgMi40OSAyIDQgMiAyLjIxIDAgNC0xLjc5IDQtNCAwLTEuNjYtMS4zNC0zLTMtM3oiIGZpbGw9IiNFMDYyMkIiIHN0cm9rZT0iIzFDMkIzOCIgc3Ryb2tlLXdpZHRoPSIwLjYiLz48cGF0aCBkPSJNMjAuNzEgNC42M2wtMS4zNC0xLjM0YTEgMSAwIDAgMC0xLjQxIDBMOSAxMi4yNSAxMS43NSAxNWw4Ljk2LTguOTZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxeiIgZmlsbD0iIzhGQTNBRSIgc3Ryb2tlPSIjMUMyQjM4IiBzdHJva2Utd2lkdGg9IjAuNiIvPjwvc3ZnPg==") 4 20, crosshair;
-    touch-action: none;
   }
   /* Leaflet adds its own "leaflet-interactive" class (cursor: pointer) to
      whichever canvas/path is under the mouse while hovering an interactive
      parcel or precinct shape -- which is most of the map -- and that would
      otherwise beat the brush cursor above. */
-  #map.walk-armed .leaflet-interactive {
+  #map.walk-armed.walk-paint-cursor .leaflet-interactive {
     cursor: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBkPSJNNyAxNGMtMS42NiAwLTMgMS4zNC0zIDMgMCAxLjMxLTEuMTYgMi0yIDIgLjkyIDEuMjIgMi40OSAyIDQgMiAyLjIxIDAgNC0xLjc5IDQtNCAwLTEuNjYtMS4zNC0zLTMtM3oiIGZpbGw9IiNFMDYyMkIiIHN0cm9rZT0iIzFDMkIzOCIgc3Ryb2tlLXdpZHRoPSIwLjYiLz48cGF0aCBkPSJNMjAuNzEgNC42M2wtMS4zNC0xLjM0YTEgMSAwIDAgMC0xLjQxIDBMOSAxMi4yNSAxMS43NSAxNWw4Ljk2LTguOTZhLjk5Ni45OTYgMCAwIDAgMC0xLjQxeiIgZmlsbD0iIzhGQTNBRSIgc3Ryb2tlPSIjMUMyQjM4IiBzdHJva2Utd2lkdGg9IjAuNiIvPjwvc3ZnPg==") 4 20, crosshair !important;
   }
 
@@ -1488,12 +1502,57 @@
 </head>
 <body>
 
+<!-- Runs INSTANTLY, before anything else on the page (including the two
+     render-blocking <script src> tags for Leaflet/Turf.js below, and long
+     before this page's own login-handling code near the bottom of <body>)
+     -- see that code's own comment on login-form for the full story, but in
+     short: if a password manager's "autofill and submit" reacts faster than
+     those external scripts can finish downloading, the login form's native
+     HTML submission (no JS listener attached yet to stop it) can go through
+     as a plain GET to this very page, putting the username/password
+     straight into the URL and browser history. This can't retroactively
+     un-expose a password that already leaked that way, but it does scrub it
+     out of the visible address bar and this history entry the instant the
+     page (re)loads, rather than leaving it sitting there. -->
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  if (params.has("password") || params.has("passwordHash")) {
+    params.delete("password");
+    params.delete("passwordHash");
+    var clean = location.pathname + (params.toString() ? "?" + params.toString() : "") + location.hash;
+    history.replaceState(null, "", clean);
+  }
+})();
+</script>
+
 <!-- ============ LOGIN ============ -->
 <div id="login-overlay">
   <div id="login-card">
     <div class="brand"><span class="dot"></span>Ami 4 Mayor</div>
     <p class="sub">Canvassing App &mdash; sign in to continue</p>
-    <form id="login-form">
+    <!-- method="post" + onsubmit="return false;" are both a belt-and-
+         suspenders safety net, not the primary submit handling (that's the
+         async addEventListener("submit", ...) below in the main script,
+         which hashes the password client-side and POSTs it to the Apps
+         Script backend). They matter for the narrow window before that
+         script has attached: this page's real content (including this
+         form) renders and becomes interactive before the two render-
+         blocking <script src> tags for Leaflet/Turf.js below have finished
+         loading, and the actual login-handling code doesn't run until
+         after those finish -- so a fast auto-submit (typically a password
+         manager's "autofill and submit") landing in that window used to
+         fall through to the browser's OWN default form handling with no JS
+         listener yet in place to stop it. onsubmit="return false;" is a
+         plain HTML attribute, parsed and active the instant this <form>
+         element itself is parsed -- zero dependency on any external script
+         -- so it closes that race outright. method="post" is a second,
+         independent layer: even in some unforeseen case where a native
+         submission still went through, a POST sends username/password in
+         the request body, never appended to the URL as a GET query string
+         (which is what was actually leaking them into the address bar and
+         browser history). -->
+    <form id="login-form" method="post" onsubmit="return false;">
       <div class="field">
         <label for="login-username">Username</label>
         <input id="login-username" name="username" type="text" autocomplete="username" required>
@@ -1642,7 +1701,7 @@
 
     <div id="precinct-meta"></div>
     <div class="dialog-actions">
-      <button class="btn" id="precinct-cancel" type="button">Cancel</button>
+      <button class="btn" id="precinct-cancel" type="button">Cancel/Close</button>
       <button class="btn primary" id="precinct-save" type="button">Save</button>
     </div>
   </div>
@@ -4135,7 +4194,10 @@
     $("precinct-completed-date").disabled = !editor;
     $("precinct-notes").readOnly = !editor;
     $("precinct-save").hidden = !editor;
-    $("precinct-cancel").textContent = editor ? "Cancel" : "Close";
+    // Cancel/Close is a static label regardless of role -- it discards any
+    // unsaved edits for an editor and just dismisses the (read-only) panel
+    // for a viewer, so the single combined label covers both without
+    // needing to swap text based on isEditor().
     $("walk-hint-text").textContent = editor
       ? "Swipe over parcels to mark walked."
       : "Viewers can look, but can't mark parcels walked.";
@@ -5202,20 +5264,18 @@
 
   function setWalkArmed(armed) {
     $("map").classList.toggle("walk-armed", armed);
-    if (armed) {
-      map.dragging.disable();
-      // Leaflet's touch/tap handler (active whenever the browser reports
-      // touch support -- true for a lot of laptops, not just phones) fires
-      // its own synthetic "click" on pointerup independently of the native
-      // mouse click our own preventDefault() suppresses. Without disabling
-      // it too, a swipe that starts on a precinct's own polygon (which is
-      // most of the time, since parcels sit inside it) gets read as a tap
-      // and re-opens/resets the panel mid-swipe, silently discarding
-      // whatever was just painted.
-      if (map.tap) map.tap.disable();
-    } else {
+    if (!armed) {
+      // Dragging/tap are only ever disabled for the duration of a single
+      // paint stroke that starts inside the open precinct (see
+      // setupSwipeToWalk()), not map-wide just because Walked is checked --
+      // re-enable them here as a safety net in case a stroke was
+      // interrupted mid-swipe (e.g. Escape/Cancel while still touching the
+      // screen) and never got the chance to re-enable them itself. Also
+      // clear the paintbrush cursor immediately rather than waiting for the
+      // next pointermove.
       map.dragging.enable();
       if (map.tap) map.tap.enable();
+      $("map").classList.remove("walk-paint-cursor");
     }
     // Arming/disarming changes precinctStyle()'s output (see colorSuppressed
     // above) for the open precinct -- restyle it immediately either way.
@@ -5274,7 +5334,19 @@
         });
       }
       pendingWalked = {};
-      closePrecinctPanel(false, { zoomOut: true });
+      if (walkArmed) {
+        // Keep walking: a save mid-walking-session shouldn't close the
+        // panel, fly the map back out, or uncheck Walked the way a normal
+        // save does -- the point of saving here is just to checkpoint
+        // progress without interrupting the walk. The status/walked changes
+        // are already committed above (into precinctStatusData/
+        // parcelWalkedData); just refresh the UI that reflects them.
+        restylePrecinct(id);
+        updatePrecinctListRow(id);
+        renderPrecinctLegend();
+      } else {
+        closePrecinctPanel(false, { zoomOut: true });
+      }
       buildPrecinctList($("precinct-search-input").value);
       buildAddressList($("search-input").value);
     } catch (e) {
@@ -5296,23 +5368,75 @@
   // Only active while a precinct's panel is open AND its "Walked" checkbox
   // is on. Scoped to that precinct's own parcels (not the whole map), and
   // toggles each parcel at most once per continuous swipe stroke.
+  // True while (clientX, clientY) sits inside the currently-open precinct's
+  // own boundary polygon -- used to scope both the paintbrush cursor and
+  // the paint-stroke gesture itself to that precinct, so the rest of the
+  // map keeps behaving like a normal map (drag to pan, wheel to zoom) while
+  // Walked is checked.
+  function isPointInsideOpenPrecinct(clientX, clientY) {
+    var p = precinctIndex[openPrecinctId];
+    if (!p) return false;
+    var mapRect = $("map").getBoundingClientRect();
+    var containerPoint = L.point(clientX - mapRect.left, clientY - mapRect.top);
+    var latlng = map.containerPointToLatLng(containerPoint);
+    var pt = turf.point([latlng.lng, latlng.lat]);
+    return turf.booleanPointInPolygon(pt, p.feature);
+  }
+
   function setupSwipeToWalk() {
     var mapEl = $("map");
+    // Tracks whether THIS stroke is the one that disabled dragging/tap (as
+    // opposed to them already being enabled/disabled for some other
+    // reason), so pointerup/pointercancel only re-enables them when this
+    // code is actually the one that turned them off.
+    var strokeDisabledDragging = false;
 
     mapEl.addEventListener("pointerdown", function (e) {
       if (!walkArmed || !openPrecinctId) return;
+      // Outside the precinct's own boundary, leave the map alone entirely --
+      // no painting to do there, so a mouse-down should pan the map exactly
+      // like it would with Walked unchecked.
+      if (!isPointInsideOpenPrecinct(e.clientX, e.clientY)) return;
       swiping = true;
       swipeTouchedThisStroke = {};
+      // Suppress panning (mouse) and Leaflet's synthetic tap-click (touch)
+      // only for the duration of this stroke -- painting is itself a drag
+      // gesture over the precinct, so without this the map would pan
+      // instead of marking parcels walked, or (on a touchscreen) a swipe
+      // starting on the precinct's own polygon would get read as a tap and
+      // re-open/reset the panel mid-swipe, discarding whatever was just
+      // painted. Re-enabled on pointerup/pointercancel below regardless of
+      // where the stroke ends, so wandering back outside the boundary
+      // mid-stroke still finishes cleanly.
+      strokeDisabledDragging = true;
+      map.dragging.disable();
+      if (map.tap) map.tap.disable();
       paintAtPoint(e.clientX, e.clientY);
       e.preventDefault();
     });
     mapEl.addEventListener("pointermove", function (e) {
+      // Keep the paintbrush cursor scoped to the precinct's own boundary --
+      // Leaflet's "leaflet-interactive" cursor:pointer otherwise covers
+      // most of the map (parcels, precinct shapes), so without this the
+      // brush would show everywhere while Walked is checked, not just
+      // where painting is actually possible.
+      if (walkArmed && openPrecinctId) {
+        mapEl.classList.toggle("walk-paint-cursor", isPointInsideOpenPrecinct(e.clientX, e.clientY));
+      }
       if (!swiping) return;
       paintAtPoint(e.clientX, e.clientY);
       e.preventDefault();
     });
-    window.addEventListener("pointerup", function () { swiping = false; });
-    window.addEventListener("pointercancel", function () { swiping = false; });
+    function endStroke() {
+      swiping = false;
+      if (strokeDisabledDragging) {
+        strokeDisabledDragging = false;
+        map.dragging.enable();
+        if (map.tap) map.tap.enable();
+      }
+    }
+    window.addEventListener("pointerup", endStroke);
+    window.addEventListener("pointercancel", endStroke);
   }
 
   // ================== COLLAPSE/RESTORE THE SIDEBAR ==================
