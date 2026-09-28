@@ -4784,12 +4784,25 @@
   // house party and yard sign markers don't go through a "select" wrapper,
   // they just open their panel straight from the marker's click handler.
   // exceptType is whichever panel is ABOUT to open, so that one is left alone.
+  // Each close is wrapped so that if one of them ever throws (a stale
+  // reference, an unexpected null -- anything not anticipated here), it
+  // logs to the console instead of aborting the whole function. Without
+  // this, an exception partway through would propagate straight up into
+  // whichever open*Panel() call is running this first (e.g. openPrecinctPanel
+  // calls this as its very first line) and abort THAT function too, before
+  // it ever reaches the line that actually unhides its own panel -- so a bug
+  // in, say, closing a yard-sign popup could silently stop a precinct's
+  // panel from ever showing, with no visible error and no obvious link
+  // between the two.
   function closeOtherMapPanels(exceptType) {
-    if (exceptType !== "precinct" && openPrecinctId) closePrecinctPanel(true, { keepSelectionState: true });
-    if (exceptType !== "district" && openDistrictId) closeDistrictPanel({ keepSelectionState: true });
-    if (exceptType !== "houseparty" && openHousePartyMarker) closeHousePartyPanel();
-    if (exceptType !== "yardsign" && openYardSignMarker) closeYardSignPanel();
-    if (exceptType !== "canvass" && quickCanvassActive) closeQuickCanvassPanel(true);
+    function safely(fn) {
+      try { fn(); } catch (e) { console.error("closeOtherMapPanels: a panel failed to close cleanly", e); }
+    }
+    if (exceptType !== "precinct" && openPrecinctId) safely(function () { closePrecinctPanel(true, { keepSelectionState: true }); });
+    if (exceptType !== "district" && openDistrictId) safely(function () { closeDistrictPanel({ keepSelectionState: true }); });
+    if (exceptType !== "houseparty" && openHousePartyMarker) safely(function () { closeHousePartyPanel(); });
+    if (exceptType !== "yardsign" && openYardSignMarker) safely(function () { closeYardSignPanel(); });
+    if (exceptType !== "canvass" && quickCanvassActive) safely(function () { closeQuickCanvassPanel(true); });
   }
 
   // ================== PRECINCT PANEL ==================
@@ -6002,19 +6015,37 @@
   // (just answers "which parcel, if any" without changing anything), so it's
   // shared by both the click handler (quickCanvassMarkAtLatLng) and the
   // hover-cursor handler (setupSwipeToWalk's pointermove) below.
+  // Called up to once per animation frame while the pointer moves during
+  // quick-canvass mode (see scheduleQuickCanvassCursorUpdate()), so this
+  // needs to stay cheap even with every precinct/parcel in the whole city
+  // in play. A real point-in-polygon test (turf.booleanPointInPolygon) walks
+  // every vertex of a shape, which adds up fast run 60x/sec across dozens of
+  // precincts and their parcels -- most of which the cursor obviously isn't
+  // anywhere near. So every precinct and parcel first gets a cheap
+  // rectangle (LatLngBounds) check -- four comparisons, no vertex walking --
+  // via a bounds cache stashed directly on the precinct/parcel-entry object
+  // (same __cachedBounds idea already used for viewport culling in
+  // updateVisibleParcels() above), and only a shape whose bounding box
+  // actually contains the point pays for the real polygon test.
   function findParcelKeyAtLatLng(latlng) {
+    var ll = L.latLng(latlng);
     var pt = turf.point([latlng.lng, latlng.lat]);
     var precinctId = null;
     for (var pid in precinctIndex) {
       if (!precinctIndex.hasOwnProperty(pid)) continue;
-      if (turf.booleanPointInPolygon(pt, precinctIndex[pid].feature)) { precinctId = pid; break; }
+      var p = precinctIndex[pid];
+      if (!p.__cachedBounds) p.__cachedBounds = p.layer.getBounds();
+      if (!p.__cachedBounds.contains(ll)) continue;
+      if (turf.booleanPointInPolygon(pt, p.feature)) { precinctId = pid; break; }
     }
     if (!precinctId) return null;
-    var p = precinctIndex[precinctId];
-    for (var i = 0; i < p.parcelKeys.length; i++) {
-      var key = p.parcelKeys[i];
+    var precinct = precinctIndex[precinctId];
+    for (var i = 0; i < precinct.parcelKeys.length; i++) {
+      var key = precinct.parcelKeys[i];
       var entry = parcelIndex[key];
-      if (!entry) continue;
+      if (!entry || !entry.layers.length) continue;
+      if (!entry.__cachedBounds) entry.__cachedBounds = groupBounds(entry);
+      if (!entry.__cachedBounds.contains(ll)) continue;
       var hit = entry.features.some(function (f) { return turf.booleanPointInPolygon(pt, f); });
       if (hit) return key;
     }
