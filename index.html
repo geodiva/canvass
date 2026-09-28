@@ -606,6 +606,36 @@
   }
   .sidebar-search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
+  /* A small grab bar between each list's search box and the list itself --
+     drag it up to grow that list past its default ~5-row cap (see
+     applyListHeightCap()/setupListResizeHandle()), taking over whatever
+     empty space the bottom-anchored .sidebar-list-stack has above it
+     (ordinary flex layout does the actual work: growing this list's own
+     max-height pushes the .sidebar-section(s) above it up the stack to make
+     room, consuming the first-visible section's "margin-top: auto" slack
+     before the stack starts scrolling -- see .sidebar-list-stack's own
+     comment). Drag back down to shrink it again. */
+  .list-resize-handle {
+    flex-shrink: 0;
+    height: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: row-resize;
+    touch-action: none;
+  }
+  .list-resize-handle::before {
+    content: "";
+    width: 32px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+  .list-resize-handle:hover::before,
+  .list-resize-handle.resizing::before {
+    background: var(--muted);
+  }
+
   /* flex: 0 0 auto (not flex: 1) is deliberate: these lists don't grow to
      fill their .sidebar-section -- they're capped to about 5 visible rows
      (max-height set from JS in applyListHeightCaps(), which measures an
@@ -614,7 +644,8 @@
      flex: 0 0 auto now (content-sized, not stretched -- see
      .sidebar-list-stack above), so a list with fewer rows than the cap just
      makes its whole section shorter instead of leaving unused space inside
-     it. */
+     it. Dragging a list's own .list-resize-handle sets an explicit
+     max-height that overrides this cap -- see applyListHeightCap(). */
   #precinct-list, #district-list, #address-list {
     flex: 0 0 auto;
     overflow-y: auto;
@@ -1644,6 +1675,7 @@
           <h2>Voter precincts</h2>
           <input id="precinct-search-input" class="sidebar-search-input" type="text" placeholder="Search precincts&hellip;" autocomplete="off">
         </div>
+        <div class="list-resize-handle" id="precinct-list-resize" title="Drag to resize the list"></div>
         <ul id="precinct-list"><li class="empty-msg">Loading precincts&hellip;</li></ul>
       </div>
       <!-- Order here (Voter precincts / City council districts / Canvassed
@@ -1656,6 +1688,7 @@
           <h2>City council districts</h2>
           <input id="district-search-input" class="sidebar-search-input" type="text" placeholder="Search districts&hellip;" autocomplete="off">
         </div>
+        <div class="list-resize-handle" id="district-list-resize" title="Drag to resize the list"></div>
         <ul id="district-list"><li class="empty-msg">Loading districts&hellip;</li></ul>
       </div>
       <div class="sidebar-section" id="address-list-section">
@@ -1663,6 +1696,7 @@
           <h2>Canvassed addresses</h2>
           <input id="search-input" class="sidebar-search-input" type="text" placeholder="Search addresses&hellip;" autocomplete="off">
         </div>
+        <div class="list-resize-handle" id="address-list-resize" title="Drag to resize the list"></div>
         <ul id="address-list"><li class="empty-msg">Loading parcels&hellip;</li></ul>
         <div class="sidebar-footer" id="count-footer">&nbsp;</div>
       </div>
@@ -2613,6 +2647,9 @@
     setupFloatingPanelDrag($("houseparty-panel"));
     setupFloatingPanelDrag($("yardsign-panel"));
     setupFloatingPanelDrag($("canvass-panel"), function () { canvassPanelManuallyPositioned = true; });
+    setupListResizeHandle($("precinct-list-resize"), $("precinct-list"));
+    setupListResizeHandle($("district-list-resize"), $("district-list"));
+    setupListResizeHandle($("address-list-resize"), $("address-list"));
     setupSidebarToggle();
 
     // Independent of the main Promise.all() below (see the House Parties
@@ -4262,20 +4299,65 @@
   // Caps a list to about 5 visible rows, scrolling internally for the rest,
   // by measuring an actual rendered <li> rather than assuming a row height
   // in px -- font rendering (and therefore row height) varies enough across
-  // browsers/OSes/zoom levels that a guessed constant would drift.
+  // browsers/OSes/zoom levels that a guessed constant would drift. Skipped
+  // once the user has dragged that list's own .list-resize-handle (see
+  // setupListResizeHandle()) -- listEl.dataset.manualHeight then overrides
+  // this default and sticks across rebuilds (every keystroke in the search
+  // box, every data refresh) until the user drags it again.
   function applyListHeightCap(listEl) {
+    if (listEl.dataset.manualHeight) {
+      listEl.style.maxHeight = listEl.dataset.manualHeight + "px";
+      return;
+    }
     var row = listEl.querySelector("li[data-precinct-id], li[data-district-id], li[data-key]");
     if (!row) return;
     var rowHeight = row.getBoundingClientRect().height;
     if (rowHeight > 0) listEl.style.maxHeight = (rowHeight * 5) + "px";
   }
   // Row height depends on font metrics, which can change on resize (e.g.
-  // phone rotation, browser zoom) -- recompute all three lists' caps then too.
+  // phone rotation, browser zoom) -- recompute all three lists' caps then too
+  // (a no-op for a manually-resized list -- see applyListHeightCap() above).
   window.addEventListener("resize", function () {
     applyListHeightCap($("precinct-list"));
     applyListHeightCap($("district-list"));
     applyListHeightCap($("address-list"));
   });
+
+  // Lets the user drag a list taller (or back shorter) than its default
+  // ~5-row cap, via the small grab bar at its top (.list-resize-handle, see
+  // its own CSS comment for why this naturally pushes whatever's above it up
+  // the sidebar instead of needing its own JS to move anything). Same
+  // module-scoped-drag-var + window-level-pointermove/up pattern as
+  // setupFloatingPanelDrag() above, just resizing instead of repositioning.
+  function setupListResizeHandle(handle, listEl) {
+    var drag = null; // { startY, startHeight } while dragging, else null
+    handle.addEventListener("pointerdown", function (e) {
+      drag = { startY: e.clientY, startHeight: listEl.getBoundingClientRect().height };
+      handle.classList.add("resizing");
+      e.preventDefault();
+    });
+    window.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      // Moving the pointer UP (smaller clientY) grows the list -- matches
+      // the handle sitting above the list, like pulling its top edge
+      // upward. Floored at one row's height so it can't be dragged down to
+      // nothing (or negative).
+      var delta = drag.startY - e.clientY;
+      var row = listEl.querySelector("li[data-precinct-id], li[data-district-id], li[data-key]");
+      var minHeight = (row && row.getBoundingClientRect().height) || 40;
+      var newHeight = Math.max(minHeight, drag.startHeight + delta);
+      listEl.style.maxHeight = newHeight + "px";
+      listEl.dataset.manualHeight = String(newHeight);
+      e.preventDefault();
+    });
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      handle.classList.remove("resizing");
+    }
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+  }
 
   // Shared by the precinct list row, the legend-adjacent progress readout,
   // and the precinct panel's own title -- one format everywhere.
