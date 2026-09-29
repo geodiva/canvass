@@ -1305,6 +1305,28 @@
   }
   #settings-toggle-btn:hover { background: var(--paper); color: var(--ink); }
 
+  /* ---------- feedback link ---------- */
+  /* A plain mailto: link (see #feedback-btn's href in the markup below), just
+     styled to sit alongside the other topbar buttons -- no click handler of
+     its own, no backend involved. The browser/OS handles it entirely: on a
+     device with an email app or a webmail default set up, it opens a
+     pre-addressed draft; on one with nothing configured, clicking it simply
+     does nothing (a plain mailto: link's one real limitation -- see the
+     README's Feedback section for why an in-app panel wasn't chosen instead). */
+  #feedback-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 7px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+  }
+  #feedback-btn:hover { background: var(--paper); color: var(--ink); }
+
   /* ---------- settings panel (hideable; colors + default basemap) ---------- */
   .settings-panel {
     position: fixed;
@@ -1614,6 +1636,7 @@
   <div id="user-chip">
     <span id="online-users-chip" hidden></span>
     <span>Logged in as <strong id="user-chip-name">&mdash;</strong></span>
+    <a id="feedback-btn" href="mailto:chuck.stein@baymoon.com?subject=Campaign%20map%20feedback" title="Email feedback about this map">Feedback</a>
     <button id="settings-toggle-btn" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
     <button id="logout-btn" type="button">Log out</button>
   </div>
