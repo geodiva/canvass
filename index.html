@@ -4077,11 +4077,17 @@
           // open, same idea as walkArmed below -- take over before the
           // normal select-a-precinct routing even runs (see the map-level
           // fallback click handler in initMap() for the case where this
-          // layer isn't the currently interactive one at all).
+          // layer isn't the currently interactive one at all). But only
+          // when the click actually hits a parcel -- most of a precinct's
+          // own area has no parcel shape on it at all (streets, parks,
+          // anything without a building), so a click that misses one falls
+          // through to normal precinct selection below instead of just
+          // doing nothing (see quickCanvassMarkAtLatLng()'s own comment).
           if (quickCanvassActive) {
-            L.DomEvent.stopPropagation(e);
-            quickCanvassMarkAtLatLng(e.latlng);
-            return;
+            if (quickCanvassMarkAtLatLng(e.latlng)) {
+              L.DomEvent.stopPropagation(e);
+              return;
+            }
           }
           // Only when Voter precincts is both on AND the current clickable
           // overlay (see setOverlayOn()/isOverlayClickActive()) -- with City
@@ -4574,11 +4580,13 @@
         });
         districtIndex[id].labelMarker = labelMarker;
         layer.on("click", function (e) {
-          // Same quick-canvass takeover as precincts (see addPrecincts).
+          // Same quick-canvass takeover as precincts (see addPrecincts) --
+          // and same "only when it actually hit a parcel" fallthrough.
           if (quickCanvassActive) {
-            L.DomEvent.stopPropagation(e);
-            quickCanvassMarkAtLatLng(e.latlng);
-            return;
+            if (quickCanvassMarkAtLatLng(e.latlng)) {
+              L.DomEvent.stopPropagation(e);
+              return;
+            }
           }
           // Same click-routing rule as precincts (see addPrecincts) -- only
           // acts when City council districts is both on and currently the
@@ -6090,10 +6098,27 @@
     return null;
   }
 
+  // Returns true when the click actually landed on a parcel (and so was
+  // marked) -- false for a click that hit nothing (isEditor() false, or no
+  // parcel under the point). Callers use this to decide whether to swallow
+  // the click or let it fall through to whatever it would otherwise have
+  // done -- see the precinct/district layers' own click handlers and the
+  // map-level fallback in initMap(), all three of which used to swallow
+  // EVERY click while this panel was open, parcel or not. Most of a
+  // precinct's own area (streets, parks, anything without a building on
+  // it) has no parcel shape at all, so a click a little off a rooftop was
+  // silently doing nothing -- no mark, but also no precinct/district
+  // selection, with zero feedback either way. That's exactly what it looks
+  // like when someone clicks a precinct wanting its info panel while this
+  // one happens to still be open from marking addresses earlier: nothing
+  // ever happens, however long they wait, because the click never reaches
+  // the normal selection logic at all.
   function quickCanvassMarkAtLatLng(latlng) {
-    if (!isEditor()) return; // defense in depth -- see the panel's own open-gating in selectParcel()
+    if (!isEditor()) return false; // defense in depth -- see the panel's own open-gating in selectParcel()
     var key = findParcelKeyAtLatLng(latlng);
-    if (key) toggleWalkedPending(key);
+    if (!key) return false;
+    toggleWalkedPending(key);
+    return true;
   }
 
   // Cancel reads "Close" once there's nothing pending, or plain "Cancel"
