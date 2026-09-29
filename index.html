@@ -39,6 +39,12 @@
     --precinct-selected-border: #0047AB;
     --precinct-label-color: #0047AB;
     --precinct-unselected-outline: #1A1A1A;
+    /* Same idea, now added for City council districts too (see
+       applySettings()) -- these two used to be plain fixed hex values
+       (DISTRICT_BORDER_HEX/DISTRICT_SELECTED_HEX in the JS below), with no
+       Settings-panel color for them at all. */
+    --district-border-color: #1D4ED8;
+    --district-selected-color: #60A5FA;
 
     /* The "current clickable overlay" outline (on the Overlays row) and its
        "choose clickable overlay" hint badge border. Briefly changed to
@@ -717,7 +723,7 @@
      shape/spacing. */
   .legend-swatch-outline {
     background: transparent;
-    border: 3px solid #1D4ED8; /* matches DISTRICT_BORDER_HEX in the JS below */
+    border: 3px solid var(--district-border-color);
     box-sizing: border-box;
   }
   /* House parties get the actual pin glyph in the legend (see
@@ -1075,13 +1081,12 @@
     display: inline-block;
     font-size: 15px;
     font-weight: 800;
-    /* Matches DISTRICT_BORDER_HEX in the JS below -- districts
-       are a fixed reference overlay with no per-item styling (no Settings
-       panel color for these, unlike the precinct label color above), so
-       this is a plain hardcoded hex rather than a CSS var. Always this
-       color regardless of selection, same as the precinct number labels
-       staying cobalt blue whether or not their precinct is selected. */
-    color: #1D4ED8;
+    /* Settings-panel-customizable (see --district-border-color above and
+       applySettings()) -- same idea as the precinct label color, just for
+       districts. Always this color regardless of selection, same as the
+       precinct number labels staying their one color whether or not their
+       precinct is selected. */
+    color: var(--district-border-color);
     text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 6px #fff;
     white-space: nowrap;
     pointer-events: none;
@@ -1099,11 +1104,10 @@
 
   /* ---------- selected district glow ---------- */
   /* Same technique and same drop-shadow parameters as the selected precinct
-     glow above (see updateSelectedDistrictHighlight) -- just colored with
-     DISTRICT_SELECTED_HEX from the JS below instead of the precinct glow's
-     Settings-panel color, since districts have no customizable color. */
+     glow above (see updateSelectedDistrictHighlight) -- now also a
+     Settings-panel color (--district-selected-color) instead of a fixed hex. */
   .district-selected-highlight {
-    filter: drop-shadow(0 0 3px #60A5FA) drop-shadow(0 0 7px #60A5FA);
+    filter: drop-shadow(0 0 3px var(--district-selected-color)) drop-shadow(0 0 7px var(--district-selected-color));
     pointer-events: none;
   }
 
@@ -1864,6 +1868,12 @@
     </div>
 
     <div class="settings-section">
+      <span class="field-label">City Council Districts</span>
+      <div class="settings-color-row"><span>Border (unselected)</span><input type="color" id="settings-color-district-border"></div>
+      <div class="settings-color-row"><span>Selected border / glow</span><input type="color" id="settings-color-district-selected"></div>
+    </div>
+
+    <div class="settings-section">
       <span class="field-label">Parcel Colors</span>
       <div class="settings-color-row">
         <span>Walked</span>
@@ -2123,7 +2133,9 @@
       // their solid color so progress still shows up clearly.
       walkedParcelTransparent: false,
       notWalkedParcelTransparent: true,
-      headerTint: "#7C3AED"   // violet -- the gradient wash behind the topbar row and each sidebar section heading
+      headerTint: "#7C3AED",  // violet -- the gradient wash behind the topbar row and each sidebar section heading
+      districtBorder: "#1D4ED8",   // City council district outlines (unselected)
+      districtSelected: "#60A5FA"  // City council districts -- selected district's glowing border
     }
   };
   function cloneSettings(s) { return JSON.parse(JSON.stringify(s)); }
@@ -2154,13 +2166,16 @@
   var baseLayers = null;          // { "Hybrid": layer, "Satellite": layer, "Streets": layer } -- set in initMap()
 
   // City council districts are a fixed reference overlay (not part of the
-  // canvassing data model, no per-district status/editing), so unlike the
-  // precinct/parcel colors above these aren't customizable from the
-  // Settings panel -- just a plain outline-only blue, distinct from the
-  // cobalt selectedBorder/precinctLabel color so a district outline is
-  // never mistaken for the selected-precinct glow.
-  var DISTRICT_BORDER_HEX = "#1D4ED8";
-  var DISTRICT_SELECTED_HEX = "#60A5FA";
+  // canvassing data model, no per-district status/editing) -- but their
+  // outline/selected-glow colors ARE customizable from the Settings panel
+  // now (colors.districtBorder/districtSelected), same mechanism as the
+  // precinct colors above: applySettings() reassigns these two from
+  // whatever's currently applied. The defaults (a plain outline-only blue,
+  // distinct from the cobalt selectedBorder/precinctLabel default) are set
+  // once here just so every *_HEX var has a sane value before the first
+  // applySettings() call ever runs.
+  var DISTRICT_BORDER_HEX = DEFAULT_SETTINGS.colors.districtBorder;
+  var DISTRICT_SELECTED_HEX = DEFAULT_SETTINGS.colors.districtSelected;
 
   // The three overlay section-header/Layers-menu-row tints (see
   // --tint-precincts/-canvass/-districts in :root above). Fixed constants,
@@ -2229,6 +2244,8 @@
     root.setProperty("--tint-canvass", hexToRgba(OVERLAY_TINT_CANVASS_HEX, SECTION_TINT_ALPHA));
     root.setProperty("--tint-districts", hexToRgba(OVERLAY_TINT_DISTRICTS_HEX, SECTION_TINT_ALPHA));
     root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
+    root.setProperty("--district-border-color", c.districtBorder);
+    root.setProperty("--district-selected-color", c.districtSelected);
     root.setProperty("--walked-color", c.walkedParcel);
     root.setProperty("--parcel-fill", c.notWalkedParcel);
     // The tint itself needs an alpha channel to fade into transparent (see
@@ -2243,6 +2260,8 @@
     NOT_WALKED_PARCEL_TRANSPARENT = !!c.notWalkedParcelTransparent;
     SELECTED_BORDER_HEX = c.selectedBorder;
     UNSELECTED_OUTLINE_HEX = c.unselectedOutline;
+    DISTRICT_BORDER_HEX = c.districtBorder;
+    DISTRICT_SELECTED_HEX = c.districtSelected;
     PRECINCT_FILL_OPACITY = (typeof settings.precinctFillOpacity === "number") ? settings.precinctFillOpacity : DEFAULT_SETTINGS.precinctFillOpacity;
     PRECINCT_STATUS_COLOR_HEX = {
       "Not Yet Printed": c.notYetPrinted,
@@ -2257,6 +2276,13 @@
     if (parcelsLayer) parcelsLayer.setStyle(parcelStyle);
     if (selectedPrecinctId) updateSelectedPrecinctHighlight(selectedPrecinctId);
     if (Object.keys(precinctIndex).length) buildPrecinctList($("precinct-search-input").value);
+    if (districtsLayer) districtsLayer.setStyle(districtStyle);
+    if (selectedDistrictId) updateSelectedDistrictHighlight(selectedDistrictId);
+    // District list rows bake DISTRICT_BORDER_HEX into their status-dot's
+    // inline style at render time (see buildDistrictList()) rather than
+    // reading a CSS var, same reasoning as buildPrecinctList() above --
+    // already-rendered rows need rebuilding to pick up a live color change.
+    if (Object.keys(districtIndex).length) buildDistrictList($("district-search-input").value);
   }
 
   function setBasemap(name) {
@@ -2584,6 +2610,17 @@
     // that's what the "zoom in on selection" feature relies on for the
     // desktop neighborhood zoom.
     map = L.map("map", { zoomControl: true, preferCanvas: true, minZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
+
+    // A dedicated pane, stacked above Leaflet's default marker pane
+    // (z-index 600), just for House Party pins -- see housePartiesLayer's
+    // own markers below. Leaflet normally z-orders markers within the SAME
+    // pane by latitude (further south draws on top), which is exactly wrong
+    // for "House parties always on top of Yard signs regardless of where
+    // either one sits" -- a higher-z-index pane beats that per-marker
+    // latitude ordering outright, so every House Party pin now draws above
+    // every Yard Sign pin (which stays in Leaflet's default marker pane)
+    // no matter their relative positions on the map.
+    map.createPane("housePartiesPane").style.zIndex = 650;
 
     var streetsLayer = attachTileRetry(L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
@@ -5258,7 +5295,7 @@
     housePartiesLayer.clearLayers();
     housePartiesData.forEach(function (party) {
       if (typeof party.lat !== "number" || typeof party.lng !== "number") return;
-      var marker = L.marker([party.lat, party.lng], { icon: housePartyIcon() });
+      var marker = L.marker([party.lat, party.lng], { icon: housePartyIcon(), pane: "housePartiesPane" });
       marker.on("click", function () { openHousePartyPanel(party, marker); });
       housePartiesLayer.addLayer(marker);
     });
@@ -6322,6 +6359,8 @@
     $("settings-color-selected-border").value = s.colors.selectedBorder;
     $("settings-color-precinct-label").value = s.colors.precinctLabel;
     $("settings-color-unselected-outline").value = s.colors.unselectedOutline;
+    $("settings-color-district-border").value = s.colors.districtBorder;
+    $("settings-color-district-selected").value = s.colors.districtSelected;
     $("settings-color-walked-parcel").value = s.colors.walkedParcel;
     $("settings-color-not-walked-parcel").value = s.colors.notWalkedParcel;
     $("settings-transparent-walked-parcel").checked = !!s.colors.walkedParcelTransparent;
@@ -6379,6 +6418,8 @@
   wireSettingsColorField("settings-color-selected-border", function (c, v) { c.selectedBorder = v; });
   wireSettingsColorField("settings-color-precinct-label", function (c, v) { c.precinctLabel = v; });
   wireSettingsColorField("settings-color-unselected-outline", function (c, v) { c.unselectedOutline = v; });
+  wireSettingsColorField("settings-color-district-border", function (c, v) { c.districtBorder = v; });
+  wireSettingsColorField("settings-color-district-selected", function (c, v) { c.districtSelected = v; });
   wireSettingsColorField("settings-color-walked-parcel", function (c, v) { c.walkedParcel = v; });
   wireSettingsColorField("settings-color-not-walked-parcel", function (c, v) { c.notWalkedParcel = v; });
 
