@@ -373,17 +373,27 @@
   @keyframes a4m-spin { to { transform: rotate(360deg); } }
 
   /* ---------- telescope-eyepiece intro reveal ---------- */
-  /* Plays exactly once, right when the map's own data finishes loading (see
-     the enterApp()/initMap() boot Promise.all() below) -- NOT while the
-     spinner above is showing, so the map underneath is always the real,
-     fully-drawn map rather than a still-loading one. Purely a one-shot
-     cosmetic flourish: fixed position, `transform`/`opacity` only (so the
-     browser can run it on the compositor without repainting every frame --
-     see playTelescopeIntro()'s own comment), and the whole overlay is
-     removed from the DOM the moment it finishes (see finishTelescopeIntro())
-     so nothing lingers afterward. z-index 9000 -- comfortably above every
-     other overlay/panel in this file (the highest of the rest is 2000) so
-     it always covers the entire app, not just the map pane. */
+  /* Two phases, both handled by the same markup (see showTelescopeHold() /
+     playTelescopeReveal() in JS below):
+       1. HELD -- inserted the instant enterApp() starts loading (same
+          moment the plain spinner below is shown), at its smallest size and
+          not yet animating. This is what actually covers the screen while
+          the map's data is still loading -- without this, the sidebar/topbar
+          are visible immediately (they're static markup, not built by JS)
+          while only the map pane itself shows a loading spinner, so the
+          "reveal" would otherwise flash in AFTER the user already saw the
+          real interface, defeating the whole point.
+       2. PLAYING -- once boot succeeds, playTelescopeReveal() adds the
+          .a4m-go class to these same elements, which is what actually
+          attaches the two @keyframes animations below and starts them
+          playing from the held state.
+     Purely cosmetic either way: fixed position, `transform`/`opacity` only
+     (so the browser can run the reveal on the compositor without repainting
+     every frame), and the whole overlay is removed from the DOM once it
+     finishes (see playTelescopeReveal()) so nothing lingers afterward.
+     z-index 9000 -- comfortably above every other overlay/panel in this file
+     (the highest of the rest is 2000) so it always covers the entire app,
+     not just the map pane. */
   #telescope-intro {
     position: fixed;
     inset: 0;
@@ -400,11 +410,12 @@
     transform: translate(-50%, -50%) scale(1);
     transform-origin: center;
     will-change: transform;
-    animation: a4m-telescope-open 3s cubic-bezier(0.74, 0, 0.86, 0.13) forwards;
     /* One box-shadow list does all of it: a huge spread for the dark mask
        outside the circle (nautical near-black, not pure black), then a
        stack of inset rings for a brass eyepiece bezel, then a couple of
-       inset blurs for the lens's own inner shadow/highlight. */
+       inset blurs for the lens's own inner shadow/highlight. Present from
+       the HELD state already -- this is what covers the screen while
+       loading, not just during the .a4m-go animation. */
     box-shadow:
       0 0 0 100vmax #04070b,
       inset 0 0 0 9px #0c1210,
@@ -412,6 +423,9 @@
       inset 0 0 0 17px #7a5f34,
       inset 0 0 26px 12px rgba(0,0,0,0.65),
       inset 0 0 10px 2px rgba(255,235,180,0.5);
+  }
+  #telescope-hole.a4m-go {
+    animation: a4m-telescope-open 3s cubic-bezier(0.74, 0, 0.86, 0.13) forwards;
   }
   #telescope-hole .a4m-tick {
     position: absolute;
@@ -437,6 +451,8 @@
     text-transform: uppercase;
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     opacity: 0;
+  }
+  #telescope-label.a4m-go {
     animation: a4m-telescope-label 3s ease forwards;
   }
   @keyframes a4m-telescope-label {
@@ -447,9 +463,10 @@
     100% { opacity: 0; }
   }
   /* Accessibility: a person who's asked their OS/browser to reduce motion
-     never sees this play at all -- see playTelescopeIntro(), which checks
-     this same media query in JS and skips straight to finishTelescopeIntro()
-     instead of ever adding these elements to the page. */
+     never gets any of this -- see showTelescopeHold()/playTelescopeReveal(),
+     which check this same media query in JS and skip straight to the plain
+     original spinner-only behavior instead of ever adding these elements to
+     the page. */
   @media (prefers-reduced-motion: reduce) {
     #telescope-hole, #telescope-label { animation: none !important; }
   }
@@ -2553,31 +2570,48 @@
     $("settings-toggle-btn").hidden = !isEditor();
     if (!map) {
       $("loading-overlay").classList.add("show");
+      showTelescopeHold();
       initMap();
     }
   }
 
   // ================== TELESCOPE-EYEPIECE INTRO ==================
-  // A one-shot 3-second reveal that plays exactly once, right when the
-  // map's own boot data finishes loading (see the very end of initMap()'s
-  // Promise.all() success handler -- deliberately NOT wired into its catch()
-  // branch, so a failed load never gets a celebratory reveal over a broken
-  // map). Built entirely out of `transform`/`opacity` animations (see the
-  // #telescope-intro CSS above) so the browser can run all three seconds on
-  // the compositor -- paint the brass ring + shadow once, then just scale
-  // that already-rasterized layer up every frame -- rather than re-painting
-  // anything per frame. Nothing here runs on a timer/interval and every
-  // element it creates is removed again once the animation ends (see
-  // cleanup() below), so once the 3 seconds are up there's exactly nothing
-  // left over from this, not even an invisible layer.
-  function playTelescopeIntro() {
-    $("loading-overlay").classList.remove("show");
-    // A person who's told their OS/browser they want reduced motion just
-    // gets the plain instant reveal above -- skip building any of the
-    // animated markup at all rather than adding it and immediately hiding
-    // it, since prefers-reduced-motion means "don't run this," not "run it
-    // invisibly."
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  // Two calls, two moments:
+  //   showTelescopeHold()  -- called above, the instant loading starts.
+  //   playTelescopeReveal() -- called once boot data actually finishes (at
+  //                            the end of initMap()'s Promise.all() success
+  //                            handler), or telescopeRevealFailed() from its
+  //                            catch() branch if loading fails instead.
+  // This split matters: the topbar and sidebar are static markup, not built
+  // by JS, so they (and the map's own small "Loading map data..." spinner)
+  // are visible the instant enterApp() runs -- well before boot's data
+  // finishes fetching. Only ever creating the telescope overlay at the END
+  // of loading (an earlier version of this did exactly that) meant the user
+  // saw the real, plain interface FIRST and the eyepiece only flashed in
+  // afterward, briefly covering something they'd already seen -- backwards
+  // from the intended "look through the eyepiece, then it opens onto the
+  // map" effect. Showing the held (not yet animating) eyepiece from the very
+  // first frame instead means that's the ONLY thing visible while loading,
+  // however long that takes, and the 3-second "open" animation is what
+  // reveals the finished map for the first time.
+  //
+  // Built entirely out of `transform`/`opacity` animations (see the
+  // #telescope-intro CSS above) so the browser can run the reveal on the
+  // compositor without repainting every frame, and the whole overlay is
+  // removed from the DOM once it finishes (see cleanupTelescope() below) so
+  // nothing lingers afterward.
+  var telescopeOverlayEl = null;
+  var telescopeLabelEl = null;
+
+  function reducedMotionRequested() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function showTelescopeHold() {
+    // A person who's told their OS/browser they want reduced motion gets
+    // exactly the plain spinner this app had before this feature existed --
+    // no eyepiece at any point, held or animated.
+    if (reducedMotionRequested()) return;
 
     var overlay = document.createElement("div");
     overlay.id = "telescope-intro";
@@ -2595,19 +2629,37 @@
     label.textContent = "Ami 4 Mayor";
     document.body.appendChild(overlay);
     document.body.appendChild(label);
+    telescopeOverlayEl = overlay;
+    telescopeLabelEl = label;
+  }
 
-    var cleaned = false;
-    function cleanup() {
-      if (cleaned) return;
-      cleaned = true;
-      overlay.remove();
-      label.remove();
-    }
+  function cleanupTelescope() {
+    if (telescopeOverlayEl) { telescopeOverlayEl.remove(); telescopeOverlayEl = null; }
+    if (telescopeLabelEl) { telescopeLabelEl.remove(); telescopeLabelEl = null; }
+  }
+
+  // Boot succeeded -- the map is fully drawn right now, so this is the exact
+  // moment to actually open the eyepiece onto it.
+  function playTelescopeReveal() {
+    $("loading-overlay").classList.remove("show");
+    if (!telescopeOverlayEl) { cleanupTelescope(); return; } // reduced motion (or some earlier failure) -- nothing held to open, just the plain instant reveal above
+    var hole = $("telescope-hole");
+    hole.classList.add("a4m-go");
+    telescopeLabelEl.classList.add("a4m-go");
     // animationend is the normal path; the setTimeout just under 4s is a
     // pure failsafe (e.g. a backgrounded tab throttling animation timing)
     // so this can never linger on screen indefinitely in some edge case.
-    $("telescope-hole").addEventListener("animationend", cleanup);
-    setTimeout(cleanup, 4000);
+    hole.addEventListener("animationend", cleanupTelescope);
+    setTimeout(cleanupTelescope, 4000);
+  }
+
+  // Boot failed instead -- never leave the person staring at a dark screen
+  // with a tiny hole in it forever. No animation here, just an immediate
+  // dismissal so the error message underneath (see the catch() branch below)
+  // is visible right away, same as if this feature didn't exist at all.
+  function telescopeRevealFailed() {
+    $("loading-overlay").classList.remove("show");
+    cleanupTelescope();
   }
 
   // ================== WHO ELSE IS ONLINE ==================
@@ -2964,10 +3016,10 @@
       updatePrecinctLabelsVisibility();
 
       // The map is fully drawn at this exact point (precincts, parcels,
-      // districts, boundary, fitted to the city) -- see playTelescopeIntro()
-      // for why the reveal only ever happens here, never while the spinner
-      // above is still showing.
-      playTelescopeIntro();
+      // districts, boundary, fitted to the city) -- see playTelescopeReveal()
+      // for why the eyepiece only ever opens here, never while it's still
+      // loading.
+      playTelescopeReveal();
 
       // Other canvassers may be updating the same Sheet at the same time --
       // periodically pull just what's changed since our last check (instead
@@ -2980,7 +3032,7 @@
       attachUpdateChecker();
     }).catch(function (err) {
       $("address-list").innerHTML = '<li class="empty-msg">Could not load map data: ' + escapeHtml(err.message || String(err)) + "</li>";
-      $("loading-overlay").classList.remove("show");
+      telescopeRevealFailed();
     });
   }
 
@@ -2993,6 +3045,7 @@
       renderOnlineUsers(res.online);
       var anySkipped = false;
       var touchedAny = false;
+      var touchedParcelKeys = [];
 
       (res.precincts || []).forEach(function (p) {
         var id = String(p.precinctId);
@@ -3015,12 +3068,18 @@
         restyleEntry(key);
         syncParcelVisibilityIfBelowThreshold(key);
         touchedAny = true;
+        touchedParcelKeys.push(key);
       });
 
       if (touchedAny) {
         buildPrecinctList($("precinct-search-input").value);
-        buildAddressList($("search-input").value);
       }
+      // Only the addresses another canvasser actually marked walked/not
+      // need their dot patched here -- a precinct-status-only change (from
+      // the loop above) never touches the address list at all, so this used
+      // to trigger a full buildAddressList() rebuild for those too, for no
+      // visible reason.
+      if (touchedParcelKeys.length) patchAddressListDots(touchedParcelKeys);
       // Another canvasser may have saved new Settings-panel colors/basemap
       // since our last check -- pick them up the same way, unless our own
       // panel is currently open with unsaved edits (applySettingsFromServer
@@ -4963,6 +5022,33 @@
     applyListHeightCap(listEl);
   }
 
+  // Cheaper alternative to a full buildAddressList() rebuild for the by-far
+  // most common case: one or a few addresses' walked status just changed
+  // (an ordinary save), and neither the sort order nor which rows match the
+  // current search filter is affected by that (walked status is part of
+  // neither) -- so the only thing that actually needs to change on screen is
+  // those rows' own status-dot color. With up to ~15,000 addresses in this
+  // list, buildAddressList() re-sorts (a locale-aware, numeric sort -- not
+  // cheap per comparison) and rebuilds the *entire* list's HTML from
+  // scratch every time it's called; doing that after every single
+  // quick-canvass save (as this app used to) is real, measurable
+  // main-thread work stacking up call after call, exactly the kind of
+  // backlog that made the whole page feel sluggish -- including, e.g., the
+  // scroll-wheel's own zoom handler having to wait behind it. Skipping
+  // straight to patching the couple of rows that actually changed avoids
+  // that entirely. A key with no matching <li> (filtered out by the current
+  // search, or the list not built yet) is silently skipped -- harmless,
+  // since a full rebuild later (typing into the search box, or the next
+  // full boot) reads each row's walked status fresh at that time anyway.
+  function patchAddressListDots(keys) {
+    (keys || []).forEach(function (key) {
+      var li = document.querySelector('#address-list li[data-key="' + cssEscape(key) + '"]');
+      if (!li) return;
+      var dot = li.querySelector(".status-dot");
+      if (dot) dot.style.background = currentWalked(key) ? WALKED_COLOR_HEX : "transparent";
+    });
+  }
+
   // Event delegation: one listener for the whole list instead of one per
   // row, which matters once the list has thousands of rows.
   $("address-list").addEventListener("click", function (e) {
@@ -5731,7 +5817,7 @@
       pendingWalked = {};
       keys.forEach(restyleEntry);
       updatePrecinctListRow(id);
-      buildAddressList($("search-input").value);
+      patchAddressListDots(keys);
     }
     openPrecinctId = null;
     pendingWalked = {};
@@ -5900,7 +5986,7 @@
         closePrecinctPanel(false, { zoomOut: true });
       }
       buildPrecinctList($("precinct-search-input").value);
-      buildAddressList($("search-input").value);
+      patchAddressListDots(walkedChanges.map(function (c) { return c.key; }));
     } catch (e) {
       $("precinct-meta").textContent = "Could not save: " + (e.message || e);
     } finally {
@@ -6391,7 +6477,7 @@
         if (entry) updatePrecinctListRow(entry.precinctId);
       });
       renderPrecinctLegend();
-      buildAddressList($("search-input").value);
+      patchAddressListDots(keys);
     }
     quickCanvassActive = false;
     quickCanvassAnchorLatLng = null;
@@ -6484,7 +6570,7 @@
       });
       renderPrecinctLegend();
       buildPrecinctList($("precinct-search-input").value);
-      buildAddressList($("search-input").value);
+      patchAddressListDots(walkedChanges.map(function (c) { return c.key; }));
       updateQuickCanvassPendingUI();
       $("canvass-panel-meta").textContent = "";
     } catch (e) {
