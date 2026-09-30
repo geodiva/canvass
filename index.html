@@ -384,9 +384,11 @@
           "reveal" would otherwise flash in AFTER the user already saw the
           real interface, defeating the whole point.
        2. PLAYING -- once boot succeeds, playTelescopeReveal() adds the
-          .a4m-go class to these same elements, which is what actually
-          attaches the two @keyframes animations below and starts them
-          playing from the held state.
+          .a4m-go class to the hole (attaching/starting its own @keyframes
+          growth animation) and .a4m-fade to the caption (see
+          #telescope-caption below), which quickly fades the "Ami 4 Mayor" /
+          spinner / "Loading..." caption out right as the hole starts
+          opening, rather than it lingering through the reveal.
      Purely cosmetic either way: fixed position, `transform`/`opacity` only
      (so the browser can run the reveal on the compositor without repainting
      every frame), and the whole overlay is removed from the DOM once it
@@ -404,8 +406,15 @@
     position: fixed;
     top: 50%;
     left: 50%;
-    width: 11vmax;
-    height: 11vmax;
+    /* clamp(), not a bare 15vmax: on a narrow phone viewport (vmax is
+       driven by the SHORT dimension's max, but still small overall --
+       e.g. 390x844 gives vmax=844, 15vmax=~127px) the hole shrank enough
+       that the "Ami 4 Mayor" title got clipped by the mask instead of
+       just fitting inside it. 200px is the floor that keeps the title
+       legible at any phone size; 320px caps how big the hole gets on
+       very large/ultrawide displays so it doesn't dominate the screen. */
+    width: clamp(200px, 15vmax, 320px);
+    height: clamp(200px, 15vmax, 320px);
     border-radius: 50%;
     transform: translate(-50%, -50%) scale(1);
     transform-origin: center;
@@ -439,28 +448,80 @@
     from { transform: translate(-50%, -50%) scale(1); }
     to   { transform: translate(-50%, -50%) scale(30); }
   }
-  #telescope-label {
+  /* The "Ami 4 Mayor" title + a small spinner + "Loading map data..." --
+     visible the whole time the eyepiece is held closed (the actual loading
+     wait), stacked vertically and centered in the same spot as the hole
+     itself. A separate fixed element, not a child of #telescope-hole,
+     deliberately -- so it never gets dragged along by the hole's own
+     `transform: scale()` (which would blur/distort text) and instead just
+     cleanly fades out in place the instant the reveal starts (see
+     .a4m-fade below). z-index sits BELOW #telescope-intro's 9000 on
+     purpose: the hole's dark mask is what naturally clips this caption to
+     a clean circle if any line of it runs slightly wider than the hole
+     itself, exactly the same as how the map/sidebar show through that same
+     transparent opening once the eyepiece opens. */
+  #telescope-caption {
     position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    z-index: 8999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    pointer-events: none;
+    /* The hole is genuinely transparent, so whatever sits behind it on the
+       real page shows through -- on a narrow phone layout that's often the
+       sidebar's own pale background, not a dark one. A radial vignette
+       behind just the caption text keeps it legible either way, without
+       needing to know or control what's actually behind the hole. */
+    padding: 10px 18px;
+    border-radius: 14px;
+    background: radial-gradient(ellipse, rgba(4,7,11,0.6) 0%, rgba(4,7,11,0.38) 65%, transparent 100%);
+  }
+  #telescope-caption .a4m-title {
     color: #f4e6c8;
-    font-weight: 700;
-    letter-spacing: 0.32em;
-    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    font-size: 15px;
     text-transform: uppercase;
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
-    opacity: 0;
+    text-align: center;
+    white-space: nowrap;
   }
-  #telescope-label.a4m-go {
-    animation: a4m-telescope-label 3s ease forwards;
+  #telescope-caption .a4m-mini-spinner {
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    border: 2px solid rgba(244, 230, 200, 0.3);
+    border-top-color: #f4e6c8;
+    border-radius: 50%;
+    animation: a4m-spin 0.8s linear infinite; /* reuses the plain loading spinner's own keyframe above */
   }
-  @keyframes a4m-telescope-label {
-    0%   { opacity: 0; }
-    12%  { opacity: 1; }
-    34%  { opacity: 1; }
-    50%  { opacity: 0; }
-    100% { opacity: 0; }
+  #telescope-caption .a4m-caption-text {
+    color: rgba(244, 230, 200, 0.8);
+    font-size: 10px;
+    letter-spacing: 0.02em;
+  }
+  /* Even with the 200px hole floor above, a narrow phone screen leaves
+     little room to spare -- trim the title/spinner/caption text down a
+     notch so the whole stack sits comfortably inside the circle instead
+     of brushing its edges. */
+  @media (max-width: 480px) {
+    #telescope-caption { gap: 3px; }
+    #telescope-caption .a4m-title { font-size: 11px; letter-spacing: 0.06em; }
+    #telescope-caption .a4m-mini-spinner { width: 14px; height: 14px; margin-top: 1px; }
+    #telescope-caption .a4m-caption-text { font-size: 8px; }
+  }
+  /* Fades the whole caption -- title, spinner, text together -- out fast
+     right as the eyepiece starts opening, rather than lingering through the
+     3-second reveal the way an earlier version of this did. */
+  #telescope-caption.a4m-fade {
+    animation: a4m-caption-fade 0.4s ease forwards;
+  }
+  @keyframes a4m-caption-fade {
+    to { opacity: 0; }
   }
   /* Accessibility: a person who's asked their OS/browser to reduce motion
      never gets any of this -- see showTelescopeHold()/playTelescopeReveal(),
@@ -468,7 +529,7 @@
      original spinner-only behavior instead of ever adding these elements to
      the page. */
   @media (prefers-reduced-motion: reduce) {
-    #telescope-hole, #telescope-label { animation: none !important; }
+    #telescope-hole, #telescope-caption { animation: none !important; }
   }
 
   aside.sidebar {
@@ -2569,8 +2630,15 @@
     // icon that opens it entirely, not just what's inside it.
     $("settings-toggle-btn").hidden = !isEditor();
     if (!map) {
-      $("loading-overlay").classList.add("show");
       showTelescopeHold();
+      // The eyepiece's own caption (title + spinner + "Loading...") fully
+      // replaces this plain spinner's job -- showing both at once, centered
+      // independently of each other, looked like a confusing double
+      // exposure of two overlapping spinners/text. Only fall back to this
+      // plain one when showTelescopeHold() didn't actually build anything
+      // (prefers-reduced-motion), so there's still SOME loading indication
+      // either way.
+      if (!telescopeOverlayEl) $("loading-overlay").classList.add("show");
       initMap();
     }
   }
@@ -2601,7 +2669,7 @@
   // removed from the DOM once it finishes (see cleanupTelescope() below) so
   // nothing lingers afterward.
   var telescopeOverlayEl = null;
-  var telescopeLabelEl = null;
+  var telescopeCaptionEl = null;
 
   function reducedMotionRequested() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -2623,19 +2691,26 @@
       '<div class="a4m-tick left"></div>' +
       '<div class="a4m-tick right"></div>' +
       "</div>";
-    var label = document.createElement("div");
-    label.id = "telescope-label";
-    label.setAttribute("aria-hidden", "true");
-    label.textContent = "Ami 4 Mayor";
+    // The title/spinner/"Loading..." caption -- visible the whole time the
+    // eyepiece is held closed (see #telescope-caption's own CSS comment for
+    // why this is a separate element from telescope-hole rather than a
+    // child of it).
+    var caption = document.createElement("div");
+    caption.id = "telescope-caption";
+    caption.setAttribute("aria-hidden", "true");
+    caption.innerHTML =
+      '<div class="a4m-title">Ami 4 Mayor</div>' +
+      '<div class="a4m-mini-spinner"></div>' +
+      '<div class="a4m-caption-text">Loading map data&hellip;</div>';
     document.body.appendChild(overlay);
-    document.body.appendChild(label);
+    document.body.appendChild(caption);
     telescopeOverlayEl = overlay;
-    telescopeLabelEl = label;
+    telescopeCaptionEl = caption;
   }
 
   function cleanupTelescope() {
     if (telescopeOverlayEl) { telescopeOverlayEl.remove(); telescopeOverlayEl = null; }
-    if (telescopeLabelEl) { telescopeLabelEl.remove(); telescopeLabelEl = null; }
+    if (telescopeCaptionEl) { telescopeCaptionEl.remove(); telescopeCaptionEl = null; }
   }
 
   // Boot succeeded -- the map is fully drawn right now, so this is the exact
@@ -2645,7 +2720,7 @@
     if (!telescopeOverlayEl) { cleanupTelescope(); return; } // reduced motion (or some earlier failure) -- nothing held to open, just the plain instant reveal above
     var hole = $("telescope-hole");
     hole.classList.add("a4m-go");
-    telescopeLabelEl.classList.add("a4m-go");
+    telescopeCaptionEl.classList.add("a4m-fade");
     // animationend is the normal path; the setTimeout just under 4s is a
     // pure failsafe (e.g. a backgrounded tab throttling animation timing)
     // so this can never linger on screen indefinitely in some edge case.
