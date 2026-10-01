@@ -2891,6 +2891,32 @@
     // desktop neighborhood zoom.
     map = L.map("map", { zoomControl: true, preferCanvas: true, minZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 }).setView(CONFIG.MAP_CENTER, CONFIG.MAP_ZOOM);
 
+    // Works around a real Leaflet bug, not anything of ours: a scroll-wheel
+    // zoom plays out as a ~250ms animation, and if the SAME animation is
+    // still in flight (map._animatingZoom still true) when the next wheel
+    // tick arrives, Leaflet's own _tryAnimatedZoom() just returns early and
+    // silently drops that second zoom request entirely -- no error, no
+    // visual change, nothing queued to run later. Dragging to pan is
+    // unaffected (it doesn't go through this animated-zoom path at all),
+    // which is exactly why panning can feel totally fine while a second
+    // scroll a moment later seems to do nothing. In practice this is very
+    // easy to trigger: scrolling again within that ~250ms window -- which
+    // barely takes any real-world hesitation -- eats the input, and the
+    // zoom only actually happens on whatever LATER scroll attempt happens to
+    // land after the first animation has fully finished. That gap between
+    // "the attempt that got silently eaten" and "the one that finally
+    // worked" is what reads as a long, unresponsive delay. The fix: the
+    // instant a new wheel tick comes in, if a zoom animation is still
+    // playing, force it to finish immediately (snapping straight to its
+    // already-decided target zoom, which Leaflet would have landed on a
+    // moment later anyway) so the new tick starts clean instead of getting
+    // swallowed. Passive since this never calls preventDefault itself --
+    // Leaflet's own listener (registered first, so it runs first on every
+    // wheel event) still fully owns actually scrolling/zooming the map.
+    map.getContainer().addEventListener("wheel", function () {
+      if (map._animatingZoom) map._onZoomTransitionEnd();
+    }, { passive: true });
+
     // A dedicated pane, stacked above Leaflet's default marker pane
     // (z-index 600), just for House Party pins -- see housePartiesLayer's
     // own markers below. Leaflet normally z-orders markers within the SAME
