@@ -373,11 +373,14 @@
   @keyframes a4m-spin { to { transform: rotate(360deg); } }
 
   /* ---------- telescope-eyepiece intro reveal ---------- */
-  /* Two phases, both handled by the same markup (see showTelescopeHold() /
+  /* Three beats, all handled by the same markup (see showTelescopeHold() /
      playTelescopeReveal() in JS below):
+       0. INTRO -- a 1-second "zoom in": the lens starts wide open and
+          closes down to its resting size (.a4m-in). Reveal never starts
+          before this finishes, even if the data is ready sooner.
        1. HELD -- inserted the instant enterApp() starts loading (same
-          moment the plain spinner below is shown), at its smallest size and
-          not yet animating. This is what actually covers the screen while
+          moment the plain spinner below is shown), at its resting size.
+          This is what actually covers the screen while
           the map's data is still loading -- without this, the sidebar/topbar
           are visible immediately (they're static markup, not built by JS)
           while only the map pane itself shows a loading spinner, so the
@@ -413,6 +416,13 @@
        just fitting inside it. 200px is the floor that keeps the title
        legible at any phone size; 320px caps how big the hole gets on
        very large/ultrawide displays so it doesn't dominate the screen. */
+    /* This is "position 0" on the telescope's 0-100 pull-back scale: 0 = fully
+       zoomed in (this small eyepiece, scale 1), 100 = pulled back far enough
+       that the map just fills the screen. The intro starts at position 35 and
+       zooms in to this size; the reveal pulls back out from it to 100 and
+       beyond. The 200px floor keeps the title legible on a phone, the 320px
+       cap stops it getting huge on a big display (JS mirrors this exact
+       clamp() to work out the 0-100 scale -- see telescopeRestDiameter()). */
     width: clamp(200px, 15vmax, 320px);
     height: clamp(200px, 15vmax, 320px);
     border-radius: 50%;
@@ -433,8 +443,45 @@
       inset 0 0 26px 12px rgba(0,0,0,0.65),
       inset 0 0 10px 2px rgba(255,235,180,0.5);
   }
+  /* Phase 1 -- the intro "zoom in": the eyepiece starts at position 35 on
+     the 0-100 pull-back scale (--a4m-start-scale is set from JS because the
+     scale that equals "35% of the way to a full-screen map" depends on the
+     screen size) and closes down to position 0 over 1 second, then simply
+     stays there until the data is ready. `both` holds the starting pose from
+     the very first frame and the resting pose afterward. */
+  #telescope-hole.a4m-in {
+    animation: a4m-telescope-close 1s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
   #telescope-hole.a4m-go {
     animation: a4m-telescope-open 3s cubic-bezier(0.74, 0, 0.86, 0.13) forwards;
+  }
+  @keyframes a4m-telescope-close {
+    from { transform: translate(-50%, -50%) scale(var(--a4m-start-scale, 3.5)); }
+    to   { transform: translate(-50%, -50%) scale(1); }
+  }
+  /* What you actually see THROUGH the lens while it's held (and which the
+     real app then cross-fades in over). An opaque dark "glass" layer between
+     the app and the mask, so the page's own UI (sidebar, topbar, whatever
+     happens to sit at screen center) never shows through the opening
+     before it's ready -- fading this layer out (.a4m-blend) is what
+     alpha-blends the new map in. */
+  #telescope-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 8998;
+    pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, #1b2a38 0%, #0a1118 55%, #04070b 100%);
+  }
+  /* The real map fades in during the pull-back, centered on position 60
+     (see TELESCOPE_FADE_* in JS, which works out the exact delay/duration
+     for this screen size and sets --a4m-fade-delay / --a4m-fade-dur) -- not
+     switched on at the start of the pull-back. */
+  #telescope-backdrop.a4m-blend {
+    animation: a4m-backdrop-blend var(--a4m-fade-dur, 0.6s) ease-in-out var(--a4m-fade-delay, 0s) both;
+  }
+  @keyframes a4m-backdrop-blend {
+    from { opacity: 1; }
+    to   { opacity: 0; }
   }
   #telescope-hole .a4m-tick {
     position: absolute;
@@ -529,7 +576,7 @@
      original spinner-only behavior instead of ever adding these elements to
      the page. */
   @media (prefers-reduced-motion: reduce) {
-    #telescope-hole, #telescope-caption { animation: none !important; }
+    #telescope-hole, #telescope-caption, #telescope-backdrop { animation: none !important; }
   }
 
   aside.sidebar {
@@ -1639,6 +1686,23 @@
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  /* Live preview strip under the heading-rotation slider: one chip per
+     heading color, painted straight from the same CSS variables the real
+     headings use, so it can never disagree with them. */
+  .settings-tint-swatches {
+    display: flex;
+    gap: 4px;
+    padding: 2px 8px 4px;
+  }
+  .settings-tint-swatches span {
+    flex: 1 1 0;
+    height: 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    /* Tints are translucent washes; sit them on the panel color like the
+       real headings do. */
+    background-color: var(--panel);
+  }
   .settings-checkbox-row {
     display: flex;
     align-items: center;
@@ -2018,6 +2082,20 @@
     <div class="settings-section">
       <span class="field-label">Interface</span>
       <div class="settings-color-row"><span>Section heading tint</span><input type="color" id="settings-color-header-tint"></div>
+      <div class="settings-slider-row">
+        <span>Heading color rotation</span>
+        <input type="range" id="settings-tint-hue-shift" min="0" max="359" step="1">
+        <span class="settings-slider-value" id="settings-tint-hue-shift-value">0&deg;</span>
+      </div>
+      <div class="settings-tint-swatches" aria-hidden="true">
+        <span style="background: var(--header-tint)"></span>
+        <span style="background: var(--tint-precincts)"></span>
+        <span style="background: var(--tint-canvass)"></span>
+        <span style="background: var(--tint-districts)"></span>
+        <span style="background: var(--tint-houseparties)"></span>
+        <span style="background: var(--tint-yardsigns)"></span>
+      </div>
+      <p class="settings-hint">Turns the whole set of heading colors around the color wheel together, keeping them evenly spread apart -- drag to see the topbar, sidebar section headings and Layers menu rows all shift at once.</p>
       <label class="settings-checkbox-row">
         <input type="checkbox" id="settings-show-zoom-level">
         <span>Show zoom level on map</span>
@@ -2293,6 +2371,7 @@
   var DEFAULT_SETTINGS = {
     basemap: "Streets",
     precinctFillOpacity: 0.22,   // how solid the precinct status fill looks on the map (0 = fully see-through, 1 = fully opaque)
+    tintHueShift: 0,             // degrees (0-359) every heading tint (topbar + sidebar sections + Layers rows) is rotated around the color wheel together
     colors: {
       notYetPrinted: "#D1493F",
       printed: "#E0B23F",
@@ -2325,6 +2404,9 @@
     if (override && override.basemap) merged.basemap = override.basemap;
     if (override && typeof override.precinctFillOpacity === "number" && !isNaN(override.precinctFillOpacity)) {
       merged.precinctFillOpacity = Math.max(0, Math.min(1, override.precinctFillOpacity));
+    }
+    if (override && typeof override.tintHueShift === "number" && !isNaN(override.tintHueShift)) {
+      merged.tintHueShift = ((Math.round(override.tintHueShift) % 360) + 360) % 360;
     }
     if (override && override.colors) {
       Object.keys(merged.colors).forEach(function (k) {
@@ -2370,6 +2452,57 @@
   var OVERLAY_TINT_PRECINCTS_HEX = "#2B60AB"; // hue 215 deg
   var OVERLAY_TINT_CANVASS_HEX = "#60AB2B";   // hue 95 deg  (215 + 120)
   var OVERLAY_TINT_DISTRICTS_HEX = "#AB2B60"; // hue 335 deg (215 + 240)
+  // The two later additions (see --tint-houseparties/--tint-yardsigns in
+  // :root) used to exist only as CSS fallback values; they're constants here
+  // too now so the heading-rotation setting can turn them along with the
+  // other three.
+  var OVERLAY_TINT_HOUSEPARTIES_HEX = "#AB762B"; // hue ~35 deg
+  var OVERLAY_TINT_YARDSIGNS_HEX = "#2BAB76";    // hue ~155 deg
+
+  // --- hue rotation helpers (for the Settings "Heading color rotation") ---
+  // Rotating in HSL keeps each color's own saturation/lightness, so turning
+  // the wheel moves every heading to a new hue without making any of them
+  // lighter, darker or duller -- and since all of them turn by the SAME
+  // angle, the even spacing between them (see the comment above) survives
+  // at every setting.
+  function hexToHsl(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return null;
+    var num = parseInt(m[1], 16);
+    var r = ((num >> 16) & 255) / 255, g = ((num >> 8) & 255) / 255, b = (num & 255) / 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    var h = 0, l = (max + min) / 2, sat = 0;
+    if (d) {
+      sat = d / (1 - Math.abs(2 * l - 1));
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return { h: h, s: sat, l: l };
+  }
+  function hslToHex(h, sat, l) {
+    h = ((h % 360) + 360) % 360;
+    var c = (1 - Math.abs(2 * l - 1)) * sat;
+    var x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    var mm = l - c / 2;
+    var r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    function to255(v) { return Math.round((v + mm) * 255); }
+    return "#" + [to255(r), to255(g), to255(b)].map(function (v) { return v.toString(16).padStart(2, "0"); }).join("");
+  }
+  function rotateHueHex(hex, degrees) {
+    if (!degrees) return hex;
+    var hsl = hexToHsl(hex);
+    if (!hsl) return hex; // not a plain #rrggbb -- leave it alone rather than guess
+    return hslToHex(hsl.h + degrees, hsl.s, hsl.l);
+  }
 
   // These four are plain JS values (not CSS var() references) because
   // Leaflet's Canvas renderer draws to a <canvas> pixel buffer -- it can't
@@ -2418,9 +2551,15 @@
     // SECTION_TINT_ALPHA (not HEADER_TINT_ALPHA) so these three
     // overlay-specific tints read as clearly distinct colors, not a light
     // wash that all looks about the same.
-    root.setProperty("--tint-precincts", hexToRgba(OVERLAY_TINT_PRECINCTS_HEX, SECTION_TINT_ALPHA));
-    root.setProperty("--tint-canvass", hexToRgba(OVERLAY_TINT_CANVASS_HEX, SECTION_TINT_ALPHA));
-    root.setProperty("--tint-districts", hexToRgba(OVERLAY_TINT_DISTRICTS_HEX, SECTION_TINT_ALPHA));
+    // All of them (plus the topbar's own header tint, below) are then turned
+    // by the same Settings "Heading color rotation" angle, so the whole set
+    // shifts together and stays evenly spread.
+    var hueShift = (typeof settings.tintHueShift === "number" && !isNaN(settings.tintHueShift)) ? settings.tintHueShift : 0;
+    root.setProperty("--tint-precincts", hexToRgba(rotateHueHex(OVERLAY_TINT_PRECINCTS_HEX, hueShift), SECTION_TINT_ALPHA));
+    root.setProperty("--tint-canvass", hexToRgba(rotateHueHex(OVERLAY_TINT_CANVASS_HEX, hueShift), SECTION_TINT_ALPHA));
+    root.setProperty("--tint-districts", hexToRgba(rotateHueHex(OVERLAY_TINT_DISTRICTS_HEX, hueShift), SECTION_TINT_ALPHA));
+    root.setProperty("--tint-houseparties", hexToRgba(rotateHueHex(OVERLAY_TINT_HOUSEPARTIES_HEX, hueShift), SECTION_TINT_ALPHA));
+    root.setProperty("--tint-yardsigns", hexToRgba(rotateHueHex(OVERLAY_TINT_YARDSIGNS_HEX, hueShift), SECTION_TINT_ALPHA));
     root.setProperty("--precinct-unselected-outline", c.unselectedOutline);
     root.setProperty("--district-border-color", c.districtBorder);
     root.setProperty("--district-selected-color", c.districtSelected);
@@ -2430,7 +2569,7 @@
     // #topbar / .sidebar-header) -- <input type="color"> can't hold one, so
     // the picker stores a plain opaque hex and this converts it to an rgba()
     // at a fixed alpha every time settings are applied.
-    root.setProperty("--header-tint", hexToRgba(c.headerTint, HEADER_TINT_ALPHA));
+    root.setProperty("--header-tint", hexToRgba(rotateHueHex(c.headerTint, hueShift), HEADER_TINT_ALPHA));
 
     WALKED_COLOR_HEX = c.walkedParcel;
     PARCEL_FILL_HEX = c.notWalkedParcel;
@@ -2670,6 +2809,65 @@
   // nothing lingers afterward.
   var telescopeOverlayEl = null;
   var telescopeCaptionEl = null;
+  var telescopeBackdropEl = null;
+  // The sequence now has three beats instead of two: (1) a 1-second intro
+  // "zoom in" the moment loading starts, (2) hold at the resting size until
+  // BOTH that intro has finished and the map data is ready -- whichever
+  // comes last -- then (3) the reveal. These two flags are how
+  // playTelescopeReveal() (called when data is ready) and the intro's own
+  // end-of-animation handler find each other regardless of which finishes
+  // first: fast data just waits out the remainder of the intro; slow data
+  // sits at the held pose, same as before.
+  var telescopeIntroDone = false;
+  var telescopeRevealWanted = false;
+
+  // ---- The 0-100 pull-back scale ----
+  // Everything about the sequence is described on one scale: 0 = fully
+  // zoomed in (the small resting eyepiece), 100 = pulled back just far
+  // enough that the map fills the whole screen. Position maps linearly to
+  // the eyepiece's DIAMETER (which is what the eye reads as "how far
+  // out"), so with S100 = (screen diagonal / resting diameter), the CSS
+  // scale() at a position is 1 + (S100 - 1) * position / 100.
+  var TELESCOPE_START_POS = 35;        // the intro starts here and zooms in to 0
+  var TELESCOPE_FADE_CENTER = 60;      // the real map is faded in around this position...
+  var TELESCOPE_FADE_HALFSPAN = 20;    // ...from (center - halfspan) to (center + halfspan)
+  var TELESCOPE_REVEAL_SECONDS = 3;    // must match the a4m-telescope-open animation duration in CSS
+  var TELESCOPE_REVEAL_END_SCALE = 30; // must match the scale() at the end of its @keyframes
+  var TELESCOPE_REVEAL_EASING = [0.74, 0, 0.86, 0.13]; // must match its cubic-bezier() in CSS
+
+  // Mirrors #telescope-hole's `clamp(200px, 15vmax, 320px)` without forcing
+  // a layout, so the intro's very first frame can already be positioned.
+  function telescopeRestDiameter() {
+    return Math.min(320, Math.max(200, 0.15 * Math.max(window.innerWidth, window.innerHeight)));
+  }
+  function telescopeScaleAtPosition(pos) {
+    var full = Math.hypot(window.innerWidth, window.innerHeight) / telescopeRestDiameter();
+    return 1 + (full - 1) * pos / 100;
+  }
+  // The reveal's timing function is a CSS cubic-bezier, so "how far through
+  // the 3 seconds are we when the eyepiece reaches position N" has no
+  // closed form -- this inverts it numerically (bisection on the curve's x
+  // to find t, then reads progress y). Returns the fraction of the reveal's
+  // duration (0-1) at which `progress` (0-1, how far its scale has gone from
+  // start to end) is reached.
+  function telescopeRevealTimeAtProgress(progress) {
+    var c = TELESCOPE_REVEAL_EASING;
+    function xAt(t) { return 3 * (1 - t) * (1 - t) * t * c[0] + 3 * (1 - t) * t * t * c[2] + t * t * t; }
+    function yAt(t) { return 3 * (1 - t) * (1 - t) * t * c[1] + 3 * (1 - t) * t * t * c[3] + t * t * t; }
+    // y(t) is monotonic for this curve, so bisect on y directly: find the
+    // curve parameter t where progress is reached, then x(t) is the actual
+    // fraction of elapsed time (CSS timing functions map time -> progress).
+    var lo = 0, hi = 1;
+    for (var i = 0; i < 50; i++) {
+      var mid = (lo + hi) / 2;
+      if (yAt(mid) < progress) lo = mid; else hi = mid;
+    }
+    return xAt((lo + hi) / 2);
+  }
+  function telescopeRevealTimeAtPosition(pos) {
+    var progress = (telescopeScaleAtPosition(pos) - 1) / (TELESCOPE_REVEAL_END_SCALE - 1);
+    return telescopeRevealTimeAtProgress(Math.max(0, Math.min(1, progress))) * TELESCOPE_REVEAL_SECONDS;
+  }
 
   function reducedMotionRequested() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -2681,16 +2879,30 @@
     // no eyepiece at any point, held or animated.
     if (reducedMotionRequested()) return;
 
+    telescopeIntroDone = false;
+    telescopeRevealWanted = false;
+
     var overlay = document.createElement("div");
     overlay.id = "telescope-intro";
     overlay.setAttribute("aria-hidden", "true");
+    // Where the intro's zoom-in begins: position 35 on the 0-100 scale, as a
+    // scale() for this particular screen size (see telescopeScaleAtPosition).
+    overlay.style.setProperty("--a4m-start-scale", telescopeScaleAtPosition(TELESCOPE_START_POS).toFixed(3));
+    // Starts with .a4m-in already on it, so the very first painted frame is
+    // the wide-open pose (just the lens backdrop) and the 1s zoom-in plays
+    // straight away -- nothing of the real interface is ever visible first.
     overlay.innerHTML =
-      '<div id="telescope-hole">' +
+      '<div id="telescope-hole" class="a4m-in">' +
       '<div class="a4m-tick top"></div>' +
       '<div class="a4m-tick bottom"></div>' +
       '<div class="a4m-tick left"></div>' +
       '<div class="a4m-tick right"></div>' +
       "</div>";
+    // What's visible through the lens until the map blends in -- see
+    // #telescope-backdrop's CSS comment.
+    var backdrop = document.createElement("div");
+    backdrop.id = "telescope-backdrop";
+    backdrop.setAttribute("aria-hidden", "true");
     // The title/spinner/"Loading..." caption -- visible the whole time the
     // eyepiece is held closed (see #telescope-caption's own CSS comment for
     // why this is a separate element from telescope-hole rather than a
@@ -2702,29 +2914,68 @@
       '<div class="a4m-title">Ami 4 Mayor</div>' +
       '<div class="a4m-mini-spinner"></div>' +
       '<div class="a4m-caption-text">Loading map data&hellip;</div>';
+    document.body.appendChild(backdrop);
     document.body.appendChild(overlay);
     document.body.appendChild(caption);
     telescopeOverlayEl = overlay;
     telescopeCaptionEl = caption;
+    telescopeBackdropEl = backdrop;
+
+    var hole = overlay.firstChild;
+    hole.addEventListener("animationend", function (e) {
+      if (e.animationName === "a4m-telescope-close") onTelescopeIntroDone();
+    });
+    // Failsafe for a backgrounded tab throttling/skipping animation events --
+    // the reveal must never wait on an intro that already visually ended.
+    setTimeout(onTelescopeIntroDone, 1500);
+  }
+
+  function onTelescopeIntroDone() {
+    if (telescopeIntroDone || !telescopeOverlayEl) return;
+    telescopeIntroDone = true;
+    if (telescopeRevealWanted) startTelescopeReveal();
   }
 
   function cleanupTelescope() {
     if (telescopeOverlayEl) { telescopeOverlayEl.remove(); telescopeOverlayEl = null; }
     if (telescopeCaptionEl) { telescopeCaptionEl.remove(); telescopeCaptionEl = null; }
+    if (telescopeBackdropEl) { telescopeBackdropEl.remove(); telescopeBackdropEl = null; }
   }
 
-  // Boot succeeded -- the map is fully drawn right now, so this is the exact
-  // moment to actually open the eyepiece onto it.
+  // Boot succeeded -- the map is fully drawn right now. If the 1s intro zoom
+  // has already finished, open the eyepiece immediately; if the data was
+  // faster than that, note it and let the intro's own end handler start the
+  // reveal the instant it lands ("wait until ready" cuts both ways).
   function playTelescopeReveal() {
     $("loading-overlay").classList.remove("show");
     if (!telescopeOverlayEl) { cleanupTelescope(); return; } // reduced motion (or some earlier failure) -- nothing held to open, just the plain instant reveal above
+    if (!telescopeIntroDone) { telescopeRevealWanted = true; return; }
+    startTelescopeReveal();
+  }
+
+  function startTelescopeReveal() {
+    if (!telescopeOverlayEl) return;
     var hole = $("telescope-hole");
+    // Swap the intro class for the reveal class. Safe to do in one go: the
+    // intro ends exactly at the base pose (scale 1) that the reveal's
+    // keyframes start from, so there's no visible jump.
+    hole.classList.remove("a4m-in");
     hole.classList.add("a4m-go");
     telescopeCaptionEl.classList.add("a4m-fade");
+    // Fade the real map in around position 60 of the pull-back: work out the
+    // moments (within the 3s) the eyepiece passes position 40 and 80, and
+    // run the backdrop's fade-out exactly between them.
+    var fadeStart = telescopeRevealTimeAtPosition(TELESCOPE_FADE_CENTER - TELESCOPE_FADE_HALFSPAN);
+    var fadeEnd = telescopeRevealTimeAtPosition(TELESCOPE_FADE_CENTER + TELESCOPE_FADE_HALFSPAN);
+    telescopeBackdropEl.style.setProperty("--a4m-fade-delay", fadeStart.toFixed(3) + "s");
+    telescopeBackdropEl.style.setProperty("--a4m-fade-dur", Math.max(0.2, fadeEnd - fadeStart).toFixed(3) + "s");
+    telescopeBackdropEl.classList.add("a4m-blend");
     // animationend is the normal path; the setTimeout just under 4s is a
     // pure failsafe (e.g. a backgrounded tab throttling animation timing)
     // so this can never linger on screen indefinitely in some edge case.
-    hole.addEventListener("animationend", cleanupTelescope);
+    hole.addEventListener("animationend", function (e) {
+      if (e.animationName === "a4m-telescope-open") cleanupTelescope();
+    });
     setTimeout(cleanupTelescope, 4000);
   }
 
@@ -6712,6 +6963,12 @@
     $("settings-color-walked-parcel").disabled = !!s.colors.walkedParcelTransparent;
     $("settings-color-not-walked-parcel").disabled = !!s.colors.notWalkedParcelTransparent;
     setPrecinctFillOpacityField(s.precinctFillOpacity);
+    setTintHueShiftField(s.tintHueShift || 0);
+  }
+
+  function setTintHueShiftField(deg) {
+    $("settings-tint-hue-shift").value = deg;
+    $("settings-tint-hue-shift-value").innerHTML = Math.round(deg) + "&deg;";
   }
 
   function setPrecinctFillOpacityField(opacity) {
@@ -6797,6 +7054,12 @@
   $("settings-precinct-fill-opacity").addEventListener("input", function () {
     draftSettings.precinctFillOpacity = parseFloat(this.value);
     $("settings-precinct-fill-opacity-value").textContent = Math.round(draftSettings.precinctFillOpacity * 100) + "%";
+    applySettings(draftSettings);
+  });
+
+  $("settings-tint-hue-shift").addEventListener("input", function () {
+    draftSettings.tintHueShift = parseInt(this.value, 10) || 0;
+    $("settings-tint-hue-shift-value").innerHTML = draftSettings.tintHueShift + "&deg;";
     applySettings(draftSettings);
   });
 
