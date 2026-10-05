@@ -494,12 +494,12 @@
     inset: 0;
     background: radial-gradient(circle at 50% 50%, rgba(10,17,24,0.22) 0%, rgba(10,17,24,0.40) 45%, rgba(4,7,11,0.70) 100%);
   }
-  /* The real map fades in during the pull-back, centered on position 60
-     (see TELESCOPE_FADE_* in JS, which works out the exact delay/duration
+  /* The real map fades in steadily (linear) from the very start of the
+     pull-back (position 0) until position 50 (see TELESCOPE_FADE_* in JS, which works out the exact delay/duration
      for this screen size and sets --a4m-fade-delay / --a4m-fade-dur) -- not
      switched on at the start of the pull-back. */
   #telescope-backdrop.a4m-blend {
-    animation: a4m-backdrop-blend var(--a4m-fade-dur, 0.6s) ease-in-out var(--a4m-fade-delay, 0s) both;
+    animation: a4m-backdrop-blend var(--a4m-fade-dur, 0.6s) linear var(--a4m-fade-delay, 0s) both;
   }
   @keyframes a4m-backdrop-blend {
     from { opacity: 1; }
@@ -2857,8 +2857,8 @@
   var TELESCOPE_START_POS = 35;        // the intro starts here and zooms in to 0
   var TELESCOPE_INTRO_SECONDS = 2;     // how long that first zoom-in takes (drives --a4m-intro-dur in CSS)
   var TELESCOPE_BASEMAP_SYNC_MAX_MS = 800; // longest the reveal will wait for the basemap stand-in to match the real map's final view
-  var TELESCOPE_FADE_CENTER = 60;      // the real map is faded in around this position...
-  var TELESCOPE_FADE_HALFSPAN = 20;    // ...from (center - halfspan) to (center + halfspan)
+  var TELESCOPE_FADE_START_POS = 0;    // the real map starts fading in as the pull-back begins...
+  var TELESCOPE_FADE_END_POS = 50;     // ...and is fully faded in by this position (steady, linear fade)
   var TELESCOPE_REVEAL_SECONDS = 3;    // must match the a4m-telescope-open animation duration in CSS
   var TELESCOPE_REVEAL_END_SCALE = 30; // must match the scale() at the end of its @keyframes
   var TELESCOPE_REVEAL_EASING = [0.74, 0, 0.86, 0.13]; // must match its cubic-bezier() in CSS
@@ -3094,11 +3094,11 @@
     hole.classList.remove("a4m-in");
     hole.classList.add("a4m-go");
     telescopeCaptionEl.classList.add("a4m-fade");
-    // Fade the real map in around position 60 of the pull-back: work out the
-    // moments (within the 3s) the eyepiece passes position 40 and 80, and
+    // Fade the real map in evenly from position 0 to position 50 of the pull-back: work out the
+    // moments (within the 3s) the eyepiece passes those two positions, and
     // run the backdrop's fade-out exactly between them.
-    var fadeStart = telescopeRevealTimeAtPosition(TELESCOPE_FADE_CENTER - TELESCOPE_FADE_HALFSPAN);
-    var fadeEnd = telescopeRevealTimeAtPosition(TELESCOPE_FADE_CENTER + TELESCOPE_FADE_HALFSPAN);
+    var fadeStart = telescopeRevealTimeAtPosition(TELESCOPE_FADE_START_POS);
+    var fadeEnd = telescopeRevealTimeAtPosition(TELESCOPE_FADE_END_POS);
     telescopeBackdropEl.style.setProperty("--a4m-fade-delay", fadeStart.toFixed(3) + "s");
     telescopeBackdropEl.style.setProperty("--a4m-fade-dur", Math.max(0.2, fadeEnd - fadeStart).toFixed(3) + "s");
     telescopeBackdropEl.classList.add("a4m-blend");
