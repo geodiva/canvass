@@ -446,11 +446,11 @@
   /* Phase 1 -- the intro "zoom in": the eyepiece starts at position 35 on
      the 0-100 pull-back scale (--a4m-start-scale is set from JS because the
      scale that equals "35% of the way to a full-screen map" depends on the
-     screen size) and closes down to position 0 over 1 second, then simply
+     screen size) and closes down to position 0 over --a4m-intro-dur (2s -- deliberately slow), then simply
      stays there until the data is ready. `both` holds the starting pose from
      the very first frame and the resting pose afterward. */
   #telescope-hole.a4m-in {
-    animation: a4m-telescope-close 1s cubic-bezier(0.4, 0, 0.2, 1) both;
+    animation: a4m-telescope-close var(--a4m-intro-dur, 2s) cubic-bezier(0.45, 0, 0.25, 1) both;
   }
   #telescope-hole.a4m-go {
     animation: a4m-telescope-open 3s cubic-bezier(0.74, 0, 0.86, 0.13) forwards;
@@ -470,7 +470,29 @@
     inset: 0;
     z-index: 8998;
     pointer-events: none;
-    background: radial-gradient(circle at 50% 50%, #1b2a38 0%, #0a1118 55%, #04070b 100%);
+    background: #0a1118; /* shows only until the first basemap tiles arrive */
+    overflow: hidden;
+  }
+  /* The basemap stand-in seen through the lens while the data loads: a plain
+     mosaic of the same tiles the real map is showing (built in JS by
+     renderTelescopeBasemap -- it sits in this backdrop rather than being
+     the real map so the sidebar/topbar never show through the opening). */
+  #telescope-backdrop .a4m-tiles, #telescope-backdrop .a4m-tiles-layer { position: absolute; inset: 0; }
+  #telescope-backdrop .a4m-tile {
+    position: absolute;
+    max-width: none;
+    opacity: 0;
+    transition: opacity 0.35s ease-out;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  #telescope-backdrop .a4m-tile.loaded { opacity: 1; }
+  /* A light dark "glass" tint over the tiles: keeps the caption readable and
+     reads as looking through a lens; the edges go darker. */
+  #telescope-backdrop .a4m-glass {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 50%, rgba(10,17,24,0.22) 0%, rgba(10,17,24,0.40) 45%, rgba(4,7,11,0.70) 100%);
   }
   /* The real map fades in during the pull-back, centered on position 60
      (see TELESCOPE_FADE_* in JS, which works out the exact delay/duration
@@ -2820,6 +2842,10 @@
   // sits at the held pose, same as before.
   var telescopeIntroDone = false;
   var telescopeRevealWanted = false;
+  // Third condition for starting the reveal: the basemap stand-in has been
+  // re-drawn for the real map's final (fitted-to-city) view, so the cross-fade
+  // lands on the same picture instead of a different zoom/position.
+  var telescopeBasemapSynced = false;
 
   // ---- The 0-100 pull-back scale ----
   // Everything about the sequence is described on one scale: 0 = fully
@@ -2829,6 +2855,8 @@
   // out"), so with S100 = (screen diagonal / resting diameter), the CSS
   // scale() at a position is 1 + (S100 - 1) * position / 100.
   var TELESCOPE_START_POS = 35;        // the intro starts here and zooms in to 0
+  var TELESCOPE_INTRO_SECONDS = 2;     // how long that first zoom-in takes (drives --a4m-intro-dur in CSS)
+  var TELESCOPE_BASEMAP_SYNC_MAX_MS = 800; // longest the reveal will wait for the basemap stand-in to match the real map's final view
   var TELESCOPE_FADE_CENTER = 60;      // the real map is faded in around this position...
   var TELESCOPE_FADE_HALFSPAN = 20;    // ...from (center - halfspan) to (center + halfspan)
   var TELESCOPE_REVEAL_SECONDS = 3;    // must match the a4m-telescope-open animation duration in CSS
@@ -2869,6 +2897,75 @@
     return telescopeRevealTimeAtProgress(Math.max(0, Math.min(1, progress))) * TELESCOPE_REVEAL_SECONDS;
   }
 
+  // ---- Basemap stand-in seen through the lens ----
+  // Mirrors the tile URLs of the real base layers in initMap() (same URLs, and
+  // the same subdomain pick Leaflet makes, so the browser's own tile cache
+  // serves the real map afterward -- no double download).
+  var ESRI_IMG = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+  var ESRI_ROADS = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
+  var ESRI_PLACES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
+  var TELESCOPE_BASEMAPS = {
+    Streets: ["https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"],
+    Satellite: [ESRI_IMG],
+    Hybrid: [ESRI_IMG, ESRI_ROADS, ESRI_PLACES]
+  };
+
+  // Draws the tiles for (lat, lng, zoom) into a new layer div inside
+  // `tilesEl`, positioned exactly as Leaflet would place them in #map (map
+  // center = the map element's center), covering the whole viewport. Returns
+  // { layer, whenSettled(cb) } -- cb fires once every tile has loaded or
+  // errored (or immediately if there are none).
+  function renderTelescopeBasemap(tilesEl, lat, lng, zoom, basemapName) {
+    var urls = TELESCOPE_BASEMAPS[basemapName] || TELESCOPE_BASEMAPS.Streets;
+    var layer = document.createElement("div");
+    layer.className = "a4m-tiles-layer";
+    var W = window.innerWidth, H = window.innerHeight;
+    var cx = W / 2, cy = H / 2;
+    var mapEl = $("map");
+    if (mapEl) {
+      var r = mapEl.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) { cx = r.left + r.width / 2; cy = r.top + r.height / 2; }
+    }
+    var z = Math.max(0, Math.min(19, Math.floor(zoom + 1e-6)));
+    var scale = Math.pow(2, zoom - z);          // CSS size of one tile = 256 * scale
+    var n = Math.pow(2, z);
+    var sinLat = Math.sin(lat * Math.PI / 180);
+    var wx = (lng + 180) / 360 * n * 256;       // world-pixel position of the map center at zoom z
+    var wy = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * n * 256;
+    var tx0 = Math.floor((wx - cx / scale) / 256), tx1 = Math.floor((wx + (W - cx) / scale) / 256);
+    var ty0 = Math.floor((wy - cy / scale) / 256), ty1 = Math.floor((wy + (H - cy) / scale) / 256);
+    var size = 256 * scale;
+    var pending = 0, waiters = [];
+    function oneDone() { if (--pending <= 0) { var w = waiters; waiters = []; w.forEach(function (f) { f(); }); } }
+    urls.forEach(function (url) {
+      for (var ty = ty0; ty <= ty1; ty++) {
+        if (ty < 0 || ty >= n) continue;
+        for (var tx = tx0; tx <= tx1; tx++) {
+          var wrappedX = ((tx % n) + n) % n;
+          var img = document.createElement("img");
+          img.className = "a4m-tile";
+          img.alt = "";
+          img.draggable = false;
+          img.style.left = (cx + (tx * 256 - wx) * scale).toFixed(2) + "px";
+          img.style.top = (cy + (ty * 256 - wy) * scale).toFixed(2) + "px";
+          // +0.5px overlap hides hairline seams between fractional-size tiles
+          img.style.width = (size + 0.5).toFixed(2) + "px";
+          img.style.height = (size + 0.5).toFixed(2) + "px";
+          pending++;
+          img.onload = function () { this.classList.add("loaded"); oneDone(); };
+          img.onerror = function () { oneDone(); };
+          img.src = url.replace("{s}", "abc"[Math.abs(wrappedX + ty) % 3]).replace("{z}", z).replace("{x}", wrappedX).replace("{y}", ty);
+          layer.appendChild(img);
+        }
+      }
+    });
+    tilesEl.appendChild(layer);
+    return {
+      layer: layer,
+      whenSettled: function (cb) { if (pending <= 0) cb(); else waiters.push(cb); }
+    };
+  }
+
   function reducedMotionRequested() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
@@ -2881,6 +2978,7 @@
 
     telescopeIntroDone = false;
     telescopeRevealWanted = false;
+    telescopeBasemapSynced = false;
 
     var overlay = document.createElement("div");
     overlay.id = "telescope-intro";
@@ -2888,8 +2986,9 @@
     // Where the intro's zoom-in begins: position 35 on the 0-100 scale, as a
     // scale() for this particular screen size (see telescopeScaleAtPosition).
     overlay.style.setProperty("--a4m-start-scale", telescopeScaleAtPosition(TELESCOPE_START_POS).toFixed(3));
+    overlay.style.setProperty("--a4m-intro-dur", TELESCOPE_INTRO_SECONDS + "s");
     // Starts with .a4m-in already on it, so the very first painted frame is
-    // the wide-open pose (just the lens backdrop) and the 1s zoom-in plays
+    // the wide-open pose (just the lens backdrop) and the slow zoom-in plays
     // straight away -- nothing of the real interface is ever visible first.
     overlay.innerHTML =
       '<div id="telescope-hole" class="a4m-in">' +
@@ -2903,6 +3002,7 @@
     var backdrop = document.createElement("div");
     backdrop.id = "telescope-backdrop";
     backdrop.setAttribute("aria-hidden", "true");
+    backdrop.innerHTML = '<div class="a4m-tiles"></div><div class="a4m-glass"></div>';
     // The title/spinner/"Loading..." caption -- visible the whole time the
     // eyepiece is held closed (see #telescope-caption's own CSS comment for
     // why this is a separate element from telescope-hole rather than a
@@ -2920,6 +3020,10 @@
     telescopeOverlayEl = overlay;
     telescopeCaptionEl = caption;
     telescopeBackdropEl = backdrop;
+    // The same view the real map starts in (initMap() sets exactly this
+    // before the data arrives), so the lens shows the basemap right away.
+    var startName = (currentSettings && currentSettings.basemap) || DEFAULT_SETTINGS.basemap;
+    renderTelescopeBasemap(backdrop.firstChild, CONFIG.MAP_CENTER[0], CONFIG.MAP_CENTER[1], CONFIG.MAP_ZOOM, startName);
 
     var hole = overlay.firstChild;
     hole.addEventListener("animationend", function (e) {
@@ -2927,13 +3031,40 @@
     });
     // Failsafe for a backgrounded tab throttling/skipping animation events --
     // the reveal must never wait on an intro that already visually ended.
-    setTimeout(onTelescopeIntroDone, 1500);
+    setTimeout(onTelescopeIntroDone, (TELESCOPE_INTRO_SECONDS + 0.5) * 1000);
   }
 
   function onTelescopeIntroDone() {
     if (telescopeIntroDone || !telescopeOverlayEl) return;
     telescopeIntroDone = true;
-    if (telescopeRevealWanted) startTelescopeReveal();
+    maybeStartTelescopeReveal();
+  }
+
+  function maybeStartTelescopeReveal() {
+    if (telescopeIntroDone && telescopeRevealWanted && telescopeBasemapSynced) startTelescopeReveal();
+  }
+
+  // Data is ready and the real map has been fitted to the city: redraw the
+  // stand-in basemap for that view in a fresh layer ABOVE the current one
+  // (its tiles fade in individually, so it dissolves in rather than
+  // flashing), drop the old layer, and only then allow the reveal to start --
+  // capped so a slow tile server can never hold the reveal up for long.
+  function syncTelescopeBasemapToMap() {
+    if (!telescopeBackdropEl || !map) { telescopeBasemapSynced = true; maybeStartTelescopeReveal(); return; }
+    var tilesEl = telescopeBackdropEl.firstChild;
+    var old = Array.prototype.slice.call(tilesEl.children);
+    var c = map.getCenter();
+    var fresh = renderTelescopeBasemap(tilesEl, c.lat, c.lng, map.getZoom(), currentBasemapName() || DEFAULT_SETTINGS.basemap);
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      old.forEach(function (el) { el.remove(); });
+      telescopeBasemapSynced = true;
+      maybeStartTelescopeReveal();
+    }
+    fresh.whenSettled(finish);
+    setTimeout(finish, TELESCOPE_BASEMAP_SYNC_MAX_MS);
   }
 
   function cleanupTelescope() {
@@ -2942,20 +3073,21 @@
     if (telescopeBackdropEl) { telescopeBackdropEl.remove(); telescopeBackdropEl = null; }
   }
 
-  // Boot succeeded -- the map is fully drawn right now. If the 1s intro zoom
-  // has already finished, open the eyepiece immediately; if the data was
-  // faster than that, note it and let the intro's own end handler start the
-  // reveal the instant it lands ("wait until ready" cuts both ways).
+  // Boot succeeded -- the map is fully drawn right now. The reveal starts once ALL of
+  // these are true -- the intro zoom has finished, the data is ready, and the
+  // basemap stand-in matches the real map's final view -- whichever lands
+  // last triggers it ("wait until ready" cuts both ways).
   function playTelescopeReveal() {
     $("loading-overlay").classList.remove("show");
     if (!telescopeOverlayEl) { cleanupTelescope(); return; } // reduced motion (or some earlier failure) -- nothing held to open, just the plain instant reveal above
-    if (!telescopeIntroDone) { telescopeRevealWanted = true; return; }
-    startTelescopeReveal();
+    telescopeRevealWanted = true;
+    syncTelescopeBasemapToMap();
   }
 
   function startTelescopeReveal() {
     if (!telescopeOverlayEl) return;
     var hole = $("telescope-hole");
+    if (hole.classList.contains("a4m-go")) return; // already started
     // Swap the intro class for the reveal class. Safe to do in one go: the
     // intro ends exactly at the base pose (scale 1) that the reveal's
     // keyframes start from, so there's no visible jump.
@@ -3347,7 +3479,7 @@
         // exactly this same fitted view later, instead of just resetting to
         // CONFIG.MAP_CENTER/MAP_ZOOM's plain starting coordinates.
         initialCityBounds = L.geoJSON(boundaryGeoJson).getBounds();
-        map.fitBounds(initialCityBounds, { padding: [24, 24] });
+        map.fitBounds(initialCityBounds, { padding: [24, 24], animate: false }); // no animation: the telescope's basemap stand-in reads the final view right after this
       } catch (e) { /* keep default view */ }
 
       // Not-yet-walked parcels stay hidden until the viewer has zoomed in
