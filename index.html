@@ -749,7 +749,7 @@
      of the three instead of splitting it into breathing room inside each
      one. overflow-y covers the case where the visible sections' combined
      natural height still doesn't fit (e.g. multiple overlays on at once,
-     each with a nearly-full 5-row list, on a short screen) -- this stack
+     each with a list capped at two-thirds of the stack, on a short screen) -- this stack
      scrolls internally rather than clipping whatever sticks out above it. */
   .sidebar-list-stack {
     flex: 1 1 auto;
@@ -860,7 +860,7 @@
   .sidebar-search-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
   /* A small grab bar between each list's search box and the list itself --
-     drag it up to grow that list past its default ~5-row cap (see
+     drag it up to grow that list past its default cap (see
      applyListHeightCap()/setupListResizeHandle()), taking over whatever
      empty space the bottom-anchored .sidebar-list-stack has above it
      (ordinary flex layout does the actual work: growing this list's own
@@ -890,10 +890,9 @@
   }
 
   /* flex: 0 0 auto (not flex: 1) is deliberate: these lists don't grow to
-     fill their .sidebar-section -- they're capped to about 5 visible rows
-     (max-height set from JS in applyListHeightCaps(), which measures an
-     actual rendered row rather than guessing a font-dependent px value) and
-     scroll internally for the rest. .sidebar-section itself is also
+     fill their .sidebar-section -- they're capped to two-thirds of the
+     vertical space available to the list stack (max-height set from JS in
+     applyListHeightCap()) and scroll internally for the rest. .sidebar-section itself is also
      flex: 0 0 auto now (content-sized, not stretched -- see
      .sidebar-list-stack above), so a list with fewer rows than the cap just
      makes its whole section shorter instead of leaving unused space inside
@@ -4241,16 +4240,13 @@
     updateLegendVisibility();
     keepLegendOnScreen();
 
-    if (key === "districts" && on) {
-      // buildDistrictList() at boot ran while this section was still
-      // hidden (off by default) -- applyListHeightCap's row-height
-      // measurement comes back 0 for a display:none element, so no cap
-      // ever got set, and the list rendered at full, uncapped height,
-      // overlapping whatever sidebar section came after it. Now that the
-      // section (and so the list) is actually visible and measurable,
-      // redo it.
-      applyListHeightCap($("district-list"));
-    }
+    // Which lists are showing decides how the two-thirds is split between
+    // them, so every list's cap needs redoing whenever one appears/disappears
+    // (the district list included: buildDistrictList() at boot ran while its
+    // section was display:none, so its row couldn't be measured and no cap
+    // ever got set -- the list rendered uncapped and overlapped the next
+    // section).
+    applyAllListHeightCaps();
 
     // Order matters: the clickable-overlay selector's own hidden state can
     // change here too, so borders are only recomputed once everything above
@@ -5100,35 +5096,65 @@
     buildPrecinctList(this.value);
   });
 
-  // Caps a list to about 5 visible rows, scrolling internally for the rest,
-  // by measuring an actual rendered <li> rather than assuming a row height
-  // in px -- font rendering (and therefore row height) varies enough across
-  // browsers/OSes/zoom levels that a guessed constant would drift. Skipped
-  // once the user has dragged that list's own .list-resize-handle (see
-  // setupListResizeHandle()) -- listEl.dataset.manualHeight then overrides
-  // this default and sticks across rebuilds (every keystroke in the search
-  // box, every data refresh) until the user drags it again.
+  // The sidebar's lists (Voter precincts / City council districts / Canvassed
+  // addresses) together get two-thirds of the vertical space available to the
+  // list stack (.sidebar-list-stack -- whatever height the sidebar has left
+  // under the pinned sections above it); the other third is the headers,
+  // search boxes, grab bars and footer around them. Whichever lists are
+  // currently showing split that two-thirds equally, so one list gets all of
+  // it and two get a third each. Each list scrolls internally for the rest,
+  // and a list with fewer rows than its share just stays short. The stack's
+  // own height comes from the sidebar's flex layout, not from its contents
+  // (it shrinks to fit when they're taller, grows when they're shorter), so
+  // measuring it here can't feed back on itself. Never smaller than the old
+  // 5-row cap (so a short screen or phone gets what it always did, and the
+  // stack scrolls instead -- row height is measured from an actual rendered
+  // <li>, since it varies with fonts/zoom), which is also the fallback if the
+  // stack has no measurable height (e.g. the sidebar is collapsed). Skipped once the user has dragged that list's own
+  // .list-resize-handle (see setupListResizeHandle()) -- listEl.dataset.
+  // manualHeight then overrides this default and sticks across rebuilds
+  // (every keystroke in the search box, every data refresh) until the user
+  // drags it again.
   function applyListHeightCap(listEl) {
+    var LIST_SPACE_FRACTION = 2 / 3; // local on purpose: setOverlayOn() can reach this during boot, before a module-level assignment further down would have run
     if (listEl.dataset.manualHeight) {
       listEl.style.maxHeight = listEl.dataset.manualHeight + "px";
       return;
     }
     var row = listEl.querySelector("li[data-precinct-id], li[data-district-id], li[data-key]");
-    if (!row) return;
-    var rowHeight = row.getBoundingClientRect().height;
-    if (rowHeight > 0) listEl.style.maxHeight = (rowHeight * 5) + "px";
+    var rowHeight = row ? row.getBoundingClientRect().height : 0;
+    var stack = listEl.closest(".sidebar-list-stack");
+    var available = stack ? stack.clientHeight : 0;
+    if (available > 0) {
+      var showing = 0;
+      ["precinct-list-section", "district-list-section", "address-list-section"].forEach(function (id) {
+        var sec = $(id);
+        if (sec && !sec.hidden) showing++;
+      });
+      var cap = available * LIST_SPACE_FRACTION / Math.max(1, showing);
+      var floor = rowHeight > 0 ? rowHeight * 5 : 190;
+      listEl.style.maxHeight = Math.round(Math.max(cap, floor)) + "px";
+    } else if (rowHeight > 0) {
+      listEl.style.maxHeight = (rowHeight * 5) + "px";
+    }
   }
-  // Row height depends on font metrics, which can change on resize (e.g.
-  // phone rotation, browser zoom) -- recompute all three lists' caps then too
-  // (a no-op for a manually-resized list -- see applyListHeightCap() above).
-  window.addEventListener("resize", function () {
+  function applyAllListHeightCaps() {
     applyListHeightCap($("precinct-list"));
     applyListHeightCap($("district-list"));
     applyListHeightCap($("address-list"));
-  });
+  }
+  // The available space changes on window resize / phone rotation / browser
+  // zoom, but also whenever the sidebar's other sections change height
+  // (Overlays rows toggling, the sidebar collapsing/expanding, the demo
+  // banner) -- a ResizeObserver on the stack itself catches all of those.
+  window.addEventListener("resize", applyAllListHeightCaps);
+  (function () {
+    var stack = document.querySelector(".sidebar-list-stack");
+    if (stack && window.ResizeObserver) new ResizeObserver(applyAllListHeightCaps).observe(stack);
+  })();
 
   // Lets the user drag a list taller (or back shorter) than its default
-  // ~5-row cap, via the small grab bar at its top (.list-resize-handle, see
+  // two-thirds-of-the-panel cap, via the small grab bar at its top (.list-resize-handle, see
   // its own CSS comment for why this naturally pushes whatever's above it up
   // the sidebar instead of needing its own JS to move anything). Same
   // module-scoped-drag-var + window-level-pointermove/up pattern as
